@@ -19,12 +19,11 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class KarixServiceImple implements KarixService {
 
     private final ObjectMapper objectMapper;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Value("${karix.api.url}")
     private String karixApiUrl;
@@ -34,6 +33,21 @@ public class KarixServiceImple implements KarixService {
 
     @Value("${karix.waba.number}")
     private String wabaNumber;
+
+    @Value("${karix.webhook-dn-id:}")
+    private String webhookDnId;
+
+
+    public KarixServiceImple(ObjectMapper objectMapper,
+                             @Value("${karvachauth.karix.connect-timeout-ms:3000}") int connectTimeoutMs,
+                             @Value("${karvachauth.karix.read-timeout-ms:10000}") int readTimeoutMs) {
+        this.objectMapper = objectMapper;
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(connectTimeoutMs);
+        factory.setReadTimeout(readTimeoutMs);
+        this.restTemplate = new RestTemplate(factory);
+    }
 
     // ==================================================================
     // PUBLIC API
@@ -162,7 +176,13 @@ public class KarixServiceImple implements KarixService {
 
         return wrap(message);
     }
-
+    /** webHookDNId property se; khaali ho toh preferences bhejo hi mat. */
+    private Map<String, Object> buildPreferences() {
+        if (webhookDnId == null || webhookDnId.isBlank()) return null;
+        Map<String, Object> preferences = new LinkedHashMap<>();
+        preferences.put("webHookDNId", webhookDnId.trim());
+        return preferences;
+    }
 
     private Map<String, Object> buildCtaUrlPayload(String toPhone, String bodyText, String displayText, String url) {
         Map<String, Object> parameters = new LinkedHashMap<>();
@@ -183,9 +203,14 @@ public class KarixServiceImple implements KarixService {
         content.put("preview_url", false);
         content.put("shorten_url", false);
         content.put("interactive", interactive);
+//
+//        Map<String, Object> preferences = new LinkedHashMap<>();
+//        preferences.put("webHookDNId", "1001");
 
-        Map<String, Object> preferences = new LinkedHashMap<>();
-        preferences.put("webHookDNId", "1001");
+
+        Map<String, Object> preferences = buildPreferences();
+
+
 
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("channel", "WABA");
@@ -349,7 +374,9 @@ public class KarixServiceImple implements KarixService {
     // ==================================================================
     // HTTP CALL
     // ==================================================================
-
+    private static String maskPhone(String p) {
+        return (p == null || p.length() < 4) ? "****" : "******" + p.substring(p.length() - 4);
+    }
     /** @return Karix mid on success, null on any failure (never throws). */
     private String postForMid(Map<String, Object> body, String toPhone, String stepName) {
         try {
@@ -363,6 +390,10 @@ public class KarixServiceImple implements KarixService {
             headers.set("Authentication", "Bearer " + karixApiKey);
 
             String json = objectMapper.writeValueAsString(body);
+
+
+            log.debug("Karix -> body={}", json);
+            log.info("stage=KARIX_SEND to={} step={}", maskPhone(toPhone), stepName);
             log.info("Karix -> sending to={} step={} body={}", toPhone, stepName, json);
 
             HttpEntity<String> request = new HttpEntity<>(json, headers);

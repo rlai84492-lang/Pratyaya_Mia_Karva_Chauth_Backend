@@ -26,4 +26,8 @@ public interface BotEngineService {
      * Safe to call on every inbound — does nothing if the name is empty or unchanged.
      */
     void updateCustomerName(String phone, String name);
+
+    /** Karva Chauth opener: text + [Choose my gift] [Visit nearby store].
+     *  /test aur keyword ("karva chauth") dono yahi call karte hain. */
+    void sendOpener(String phone, String name);
 }

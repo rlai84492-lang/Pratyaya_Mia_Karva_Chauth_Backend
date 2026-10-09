@@ -121,7 +121,17 @@ public class BotEngineServiceImple implements BotEngineService {
     //
     // So until she taps one of those two buttons she shows as OPENER everywhere.
     // ==================================================================
+    /** "karva chauth" / "karwa chauth" / "karvachauth" / "Karwa Chouth"… type kare toh opener. */
+    private static final java.util.regex.Pattern OPENER_KEYWORD =
+            java.util.regex.Pattern.compile("kar[vw]a+ch[ao]u?th");
+    private static final String KEYWORD_PAYLOAD = "KW_KARVA_CHAUTH";
+    private static final int KEYWORD_MAX_LENGTH = 40;
 
+    private static boolean isOpenerKeyword(String text) {
+        if (text == null || text.length() > KEYWORD_MAX_LENGTH) return false;   // lambe jawab journey nahi todenge
+        String letters = text.toLowerCase().replaceAll("[^a-z]", "");
+        return OPENER_KEYWORD.matcher(letters).find();
+    }
     /**
      * The Step 0 template — sent from the Karix portal, not by us, so we first see it when its first
      * delivery receipt reaches the webhook. Saves the customer, a session on OPENER and the template
@@ -279,6 +289,8 @@ public class BotEngineServiceImple implements BotEngineService {
     public void startSparkleFlow(String phone, String name) {
         startFromOpener(phone, name, TEMPLATE_SPARKLE, null, null);
     }
+
+
 
     @Override
     public boolean onButtonTap(String phone, String path, String payload) {
@@ -480,6 +492,15 @@ public class BotEngineServiceImple implements BotEngineService {
         }
     }
 
+    /**
+     * Karva Chauth opener: "How lovely! …" + [Choose my gift] [Visit nearby store].
+     * /test (template=opener) yahi call karta hai. Real keyword wala raasta onTextMessage() mein hai.
+     */
+    @Override
+    public void sendOpener(String phone, String name) {
+        startFromOpener(phone, name, TEMPLATE_WIFE, null, null);
+    }
+
     // ==================================================================
     // TYPED REPLIES — answers to questions (1J on the Wife path, 2F on the Husband path)
     // ==================================================================
@@ -496,14 +517,25 @@ public class BotEngineServiceImple implements BotEngineService {
             log.warn("onTextMessage: missing phone/text");
             return false;
         }
+        String answer = text.trim();
 
+        // ---------- Keyword ("karva chauth") -> opener ----------
+        // Session check se PEHLE: naye user ka koi session nahi hota.
+        // startFromOpener() purani journey band karke nayi OPENER session banata hai,
+        // tap ki tarah ye text save karta hai, aur "How lovely! …" + 2 buttons bhejta hai.
+        if (isOpenerKeyword(answer)) {
+            log.info("stage=KEYWORD_OPENER length={}", answer.length());
+            startFromOpener(to, null, TEMPLATE_WIFE, KEYWORD_PAYLOAD, answer);
+            return true;
+        }
+
+        // ---------- Pending question ka jawab ----------
         Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
         if (found.isEmpty()) {
             log.warn("stage=NO_ACTIVE_SESSION type=text — send the opener first");
             return false;
         }
         Session session = found.get();
-        String answer = text.trim();
 
         recordInboundText(session, answer);
         session.setLastInboundAt(LocalDateTime.now());
@@ -528,6 +560,9 @@ public class BotEngineServiceImple implements BotEngineService {
         sessionRepository.save(session);
         return handled;
     }
+
+
+
 
     // ==================================================================
     // STEP 1A / 2A — category carousel
