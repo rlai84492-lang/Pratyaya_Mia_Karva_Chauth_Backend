@@ -67,6 +67,19 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getPathsSummary(range, from, to));
     }
 
+    /**
+     * "Categories Picked" + "Budget Chosen" — customers per category / budget row.
+     * flow = celebrating → budgets.applicable = false and every budget row is 0 (no budget step).
+     */
+    @GetMapping("/category-budget-picks")
+    public ResponseEntity<Map<String, Object>> categoryBudgetPicks(
+            @RequestParam(defaultValue = "all") String flow,
+            @RequestParam(defaultValue = "today") String range,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        return ResponseEntity.ok(dashboardService.getCategoryAndBudgetPicks(flow, range, from, to));
+    }
+
     // ==================================================================
     // CONVERSATIONS PAGE
     // ==================================================================
@@ -207,7 +220,7 @@ public class DashboardController {
     /*
      * One endpoint per card. Each returns the card's full count + the rows for its "Download CSV"
      * (columns + all rows — the frontend builds the file).
-     * fullMobile : true = full numbers, false = masked (the "Full mobile numbers in downloads" checkbox)
+     * fullMobile : true = full numbers, false = masked (default) — the "Full mobile numbers in downloads" checkbox
      */
 
     /** Hint sent, no visit yet (I'm celebrating) */

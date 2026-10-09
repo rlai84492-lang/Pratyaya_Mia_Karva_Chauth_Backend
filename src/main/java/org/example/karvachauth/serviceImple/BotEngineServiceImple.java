@@ -428,7 +428,7 @@ public class BotEngineServiceImple implements BotEngineService {
      *
      *   "Visit nearby store" / "Visit Store" (BTN_STORE_FINDER, VISIT_<sku>) → BOOK_STORE_VISIT, on every path
      *
-     * The reply then moves the session on (products → W_BROWSE_PRODUCTS, budget list → H_BUDGET / S_BUDGET),
+     * The reply then moves the session on (products → W_BROWSE_PRODUCTS, budget buttons → H_BUDGET / S_BUDGET),
      * but the tap and the reply stay saved on the step she chose.
      *
      * C2 (Book a store visit): the store tap and the booking form sent after it are both saved on
@@ -612,7 +612,7 @@ public class BotEngineServiceImple implements BotEngineService {
     // ==================================================================
 
     /**
-     * Sparkle path: category tap → budget list (the Wife path skips this and goes straight to 1B).
+     * Sparkle path: category tap → budget buttons (the Wife path skips this and goes straight to 1B).
      * Budget taps come back as S_BUDGET_<band> → 1B, filtered.
      */
     private boolean sparkleChooseBudget(Session session, String code) {
@@ -620,19 +620,23 @@ public class BotEngineServiceImple implements BotEngineService {
             log.warn("stage=UNKNOWN_CATEGORY sessionId={} code={} — Mia Sutra not on Sparkle", session.getId(), code);
             return false;
         }
-        return sendBudgetList(session, code, "S_BUDGET_", STEP_S_BUDGET);
+        return sendBudgetButtons(session, code, "S_BUDGET_", STEP_S_BUDGET);
     }
 
     /**
-     * Husband path (2A-Budget): category tap → the same budget list.
+     * Husband path (2A-Budget): category tap → the same budget buttons.
      * Budget taps come back as H_BUDGET_<band> → 2B, filtered.
      */
     private boolean husbandChooseBudget(Session session, String code) {
-        return sendBudgetList(session, code, "H_BUDGET_", STEP_H_BUDGET);
+        return sendBudgetButtons(session, code, "H_BUDGET_", STEP_H_BUDGET);
     }
 
-    /** Saves the chosen category and sends the 3 budget bands as a list message. */
-    private boolean sendBudgetList(Session session, String code, String payloadPrefix, String nextStep) {
+    /**
+     * Saves the chosen category and sends the 3 budget bands as 3 tappable buttons (one message).
+     * Same payloads as before (S_BUDGET_<band> / H_BUDGET_<band>), so routing and the dashboard don't change.
+     * Button titles are max 20 characters (WhatsApp limit).
+     */
+    private boolean sendBudgetButtons(Session session, String code, String payloadPrefix, String nextStep) {
         String category = categoryFromCode(code);
         if (category == null) {
             log.warn("stage=UNKNOWN_CATEGORY sessionId={} code={}", session.getId(), code);
@@ -644,28 +648,28 @@ public class BotEngineServiceImple implements BotEngineService {
 
         String text = "Choose your budget for *" + categoryTitle(code) + "* 💫";
 
-        String mid = karixService.sendListMessage(session.getPhone(), text, "Choose budget",
+        String mid = karixService.sendButtonMessage(session.getPhone(), text,
                 List.of(
                         new String[]{payloadPrefix + BUDGET_UNDER_20K, "💫 Less than 20,000"},
                         new String[]{payloadPrefix + BUDGET_20_50K,    "💎 20,000 - 50,000"},
                         new String[]{payloadPrefix + BUDGET_ABOVE_50K, "👑 Above 50,000"}));
-        recordOutbound(session, "list", text, mid);
+        recordOutbound(session, "interactive", text, mid);
 
         if (mid == null) {
-            log.warn("stage=BUDGET_LIST_FAILED sessionId={} path={} — step not changed", session.getId(), session.getPath());
+            log.warn("stage=BUDGET_BUTTONS_FAILED sessionId={} path={} — step not changed", session.getId(), session.getPath());
             return false;
         }
         moveTo(session, nextStep);
-        log.info("stage=BUDGET_LIST_SENT sessionId={} path={} category={}", session.getId(), session.getPath(), category);
+        log.info("stage=BUDGET_BUTTONS_SENT sessionId={} path={} category={}", session.getId(), session.getPath(), category);
         return true;
     }
 
-    /** 1B (Sparkle) — budget row tapped → her category, filtered to that band. */
+    /** 1B (Sparkle) — budget button tapped → her category, filtered to that band. */
     private boolean sparkleBrowseProducts(Session session, String budget) {
         return browseWithBudget(session, budget, STEP_S_BROWSE_PRODUCTS);
     }
 
-    /** 2B (Husband) — budget row tapped → the category he picked, filtered to that band. */
+    /** 2B (Husband) — budget button tapped → the category he picked, filtered to that band. */
     private boolean husbandBrowseProducts(Session session, String budget) {
         return browseWithBudget(session, budget, STEP_H_BROWSE_PRODUCTS);
     }
@@ -753,7 +757,7 @@ public class BotEngineServiceImple implements BotEngineService {
         String title = categoryTitle(code);
         int page = session.getProductPage() == null ? 0 : session.getProductPage();
 
-        // Budget band — set on Sparkle / Husband after the budget list; null on the Wife path
+        // Budget band — set on Sparkle / Husband after the budget buttons; null on the Wife path
         int[] range = priceRange(session.getSelectedBudget());
 
         // The whole category from the products table — active pieces only, in the Mia team's display order

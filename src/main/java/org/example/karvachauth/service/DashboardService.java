@@ -16,6 +16,9 @@ public interface DashboardService {
 
     Map<String, Object> getPathsSummary(String range, String startDate, String endDate);
 
+    /** "Categories Picked" + "Budget Chosen" panels. */
+    Map<String, Object> getCategoryAndBudgetPicks(String flow, String range, String startDate, String endDate);
+
     // ---------------- Conversations page ----------------
 
     Map<String, Object> getConversationsSummary(String flow, String range, String startDate, String endDate);

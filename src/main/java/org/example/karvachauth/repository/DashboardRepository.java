@@ -10,21 +10,15 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * All dashboard native queries. Anchored to Lead only so Spring Data recognises
- * this as a JPA repository; every method here is a native query.
  *
- * Common parameters:
- *   path -> 'WIFE' / 'HUSBAND' / 'SPARKLE' (TEMPLATE_* constants), or NULL for all paths
- *   from -> inclusive start of the window
- *   to   -> exclusive end of the window (start of the day after the last day)
- *
+
  * Two kinds of window:
  *   - EVENT queries (metric cards, outcomes, activity) count things that HAPPENED in the window.
  *   - FUNNEL queries (bot flow drop-off) follow the sessions that STARTED in the window
  *     (sessions.started_at), so every stage is a subset of "Opener" and never goes above 100%.
  *
  * How the bot records data (BotEngineServiceImple):
- *   - The Step 0 template's first delivery receipt creates a session on OPENER with NO path.
+ *   - The Step 0 templates first delivery receipt creates a session on OPENER with NO path.
  *     When she taps a Step 0 button the path is set — so "path IS NOT NULL" = she tapped Step 0.
  *     (If she was mid-journey, the tap closes that session and starts a new one with the path.)
  *   - Every message is saved on the step it puts her on: a tap that IS a step ("Choose my gift",
@@ -326,6 +320,52 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                                                    @Param("from") LocalDateTime from,
                                                    @Param("to") LocalDateTime to,
                                                    @Param("limit") int limit);
+
+    // ==================================================================
+    // CATEGORIES PICKED / BUDGET CHOSEN — customers per category / budget row,
+    // counted from her taps made in the window
+    // ==================================================================
+
+    interface ChoiceCountProjection {
+        String getChoice();      // category code (PEND, MSUT, …) or budget band (UNDER_20K, …)
+        Long getCustomers();     // distinct customers who tapped it
+    }
+
+    /**
+     * Category taps: 'CAT_PEND_3' → 'PEND' (the carousel adds "_<cardIndex>", SUBSTRING_INDEX drops it).
+     * A customer who picked two categories counts once in each.
+     */
+    @Query(nativeQuery = true, value =
+            "SELECT SUBSTRING_INDEX(SUBSTRING(m.button_payload, 5), '_', 1) AS choice, " +
+                    "       COUNT(DISTINCT m.phone) AS customers " +
+                    "FROM messages m " +
+                    "JOIN sessions s ON s.id = m.session_id " +
+                    "WHERE m.direction = 'INBOUND' " +
+                    "  AND LEFT(m.button_payload, 4) = 'CAT_' " +
+                    "  AND (:path IS NULL OR s.path = :path) " +
+                    "  AND m.created_at >= :from AND m.created_at < :to " +
+                    "GROUP BY choice")
+    List<ChoiceCountProjection> countCustomersByCategory(@Param("path") String path,
+                                                         @Param("from") LocalDateTime from,
+                                                         @Param("to") LocalDateTime to);
+
+    /**
+     * Budget taps: 'H_BUDGET_UNDER_20K' / 'S_BUDGET_UNDER_20K' → 'UNDER_20K'.
+     * Only the Husband and Sparkle paths have a budget step, so the Wife path always returns nothing.
+     */
+    @Query(nativeQuery = true, value =
+            "SELECT SUBSTRING(m.button_payload, 10) AS choice, " +
+                    "       COUNT(DISTINCT m.phone) AS customers " +
+                    "FROM messages m " +
+                    "JOIN sessions s ON s.id = m.session_id " +
+                    "WHERE m.direction = 'INBOUND' " +
+                    "  AND LEFT(m.button_payload, 9) IN ('H_BUDGET_', 'S_BUDGET_') " +
+                    "  AND (:path IS NULL OR s.path = :path) " +
+                    "  AND m.created_at >= :from AND m.created_at < :to " +
+                    "GROUP BY choice")
+    List<ChoiceCountProjection> countCustomersByBudget(@Param("path") String path,
+                                                       @Param("from") LocalDateTime from,
+                                                       @Param("to") LocalDateTime to);
 
     // ==================================================================
     // CONVERSATIONS PAGE — one row per session (sessions started in the window)

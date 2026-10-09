@@ -504,6 +504,83 @@ public class DashboardServiceImple implements DashboardService {
     }
 
     // ==================================================================
+    // CATEGORIES PICKED / BUDGET CHOSEN
+    // Distinct customers per category / budget row, from taps made in the window.
+    // pct = that row's share of all the picks in the panel, so the rows add up to 100.
+    // ==================================================================
+
+    /** Carousel code in the button payload (CAT_PEND) → category value — same codes as the bot. */
+    private static final Map<String, String> CATEGORY_BY_CODE = orderedMap(
+            "PEND", CAT_PENDANTS,
+            "MSUT", CAT_MIA_SUTRA,
+            "PNCH", CAT_PENDANT_CHAIN,
+            "NECK", CAT_NECKLACES,
+            "EARR", CAT_EARRINGS,
+            "RING", CAT_RINGS,
+            "BRBG", CAT_BRACELETS_BANGLES);
+
+    @Override
+    public Map<String, Object> getCategoryAndBudgetPicks(String flow, String range, String startDate, String endDate) {
+        DateWindow window = resolveDateTimeRange(range, startDate, endDate);
+        String pathType = flowToPathType(flow);
+
+        // ---- Categories Picked ----
+        Map<String, Long> customersByCategory = new HashMap<>();
+        for (DashboardRepository.ChoiceCountProjection row
+                : dashboardRepo.countCustomersByCategory(pathType, window.from(), window.to())) {
+            String category = CATEGORY_BY_CODE.get(row.getChoice());
+            if (category != null) customersByCategory.put(category, valueOrZero(row.getCustomers()));
+        }
+        // Mia Sutra is never offered on the Sparkle path, so it isn't listed there
+        List<String> categoriesShown = CATEGORY_LABELS.keySet().stream()
+                .filter(category -> !(TEMPLATE_SPARKLE.equals(pathType) && CAT_MIA_SUTRA.equals(category)))
+                .toList();
+
+        // ---- Budget Chosen ---- (the Wife path has no budget step → every row is 0)
+        boolean budgetApplicable = !TEMPLATE_WIFE.equals(pathType);
+        Map<String, Long> customersByBudget = new HashMap<>();
+        if (budgetApplicable) {
+            for (DashboardRepository.ChoiceCountProjection row
+                    : dashboardRepo.countCustomersByBudget(pathType, window.from(), window.to())) {
+                if (BUDGET_LABELS.containsKey(row.getChoice())) {      // older bands are left out
+                    customersByBudget.put(row.getChoice(), valueOrZero(row.getCustomers()));
+                }
+            }
+        }
+
+        Map<String, Object> budgets = buildChoicePanel(new ArrayList<>(BUDGET_LABELS.keySet()), BUDGET_LABELS, customersByBudget);
+        budgets.put("applicable", budgetApplicable);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("categories", buildChoicePanel(categoriesShown, CATEGORY_LABELS, customersByCategory));
+        result.put("budgets", budgets);
+        result.put("flow", normaliseFlow(flow));
+        result.put("range", normaliseRange(range));
+        return result;
+    }
+
+    /** One panel: a row per option (in display order, 0 when nobody picked it) + the panel total. */
+    private Map<String, Object> buildChoicePanel(List<String> keys, Map<String, String> labels, Map<String, Long> customersByKey) {
+        long total = keys.stream().mapToLong(key -> customersByKey.getOrDefault(key, 0L)).sum();
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String key : keys) {
+            long customers = customersByKey.getOrDefault(key, 0L);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("key", key);
+            row.put("label", labels.get(key));
+            row.put("customers", customers);
+            row.put("pct", pct(customers, total));
+            rows.add(row);
+        }
+
+        Map<String, Object> panel = new LinkedHashMap<>();
+        panel.put("total", total);
+        panel.put("rows", rows);
+        return panel;
+    }
+
+    // ==================================================================
     // CONVERSATIONS PAGE
     // Rows are the sessions STARTED in the window that she began by tapping a Step 0 button —
     // the same sessions as "Opener" on the Overview funnel. A template she never tapped isn't shown.
