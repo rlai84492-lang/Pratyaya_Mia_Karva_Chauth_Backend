@@ -1841,15 +1841,21 @@ public class BotEngineServiceImple implements BotEngineService {
     /**
      * Links her latest Step 0 template message (saved when its receipt came in, before any session
      * existed) to the session her tap just started — so the session's messages begin at Step 0.
+     * Every status row of that template (sent / delivered / read) is linked, not just one.
      */
     private void linkOpenerTemplate(Session session) {
         try {
             messageRepository.findFirstByPhoneAndMessageTypeAndSessionIdIsNullOrderByIdDesc(session.getPhone(), "template")
                     .ifPresent(template -> {
-                        template.setSessionId(session.getId());
-                        if (template.getCustomerId() == null) template.setCustomerId(session.getCustomerId());
-                        if (template.getStep() == null) template.setStep(STEP_OPENER);
-                        messageRepository.save(template);
+                        List<Message> rows = template.getKarixMessageId() == null
+                                ? List.of(template)
+                                : messageRepository.findByKarixMessageId(template.getKarixMessageId());
+                        for (Message row : rows) {
+                            row.setSessionId(session.getId());
+                            if (row.getCustomerId() == null) row.setCustomerId(session.getCustomerId());
+                            if (row.getStep() == null) row.setStep(STEP_OPENER);
+                        }
+                        messageRepository.saveAll(rows);
                     });
         } catch (Exception e) {
             log.error("Failed to link the Step 0 template sessionId={}", session.getId(), e);   // never break the flow
@@ -1945,7 +1951,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .sessionId(session.getId())
                     .phone(session.getPhone())
                     .direction(DIR_INBOUND)
-                    .status(MSG_STATUS_RECEIVED)
+                    .status(MSG_STATUS_READ)               // her message — saved as READ, same as the Rakhi project
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType("button")
@@ -1964,7 +1970,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .sessionId(session.getId())
                     .phone(session.getPhone())
                     .direction(DIR_INBOUND)
-                    .status(MSG_STATUS_RECEIVED)
+                    .status(MSG_STATUS_READ)               // her message — saved as READ, same as the Rakhi project
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType("text")
@@ -1976,8 +1982,12 @@ public class BotEngineServiceImple implements BotEngineService {
     }
 
     /**
-     * Our message, saved on the step the session is on now. Status starts as SENT, or FAILED if Karix
-     * rejected it. If the reply then moves the session on, moveTo() re-saves it on the new step.
+     * Our message, saved on the step the session is on now. If the reply then moves the session on,
+     * moveTo() re-saves it on the new step.
+     *
+     * Status is NOT set here — it comes only from Karix receipts (the webhook): Karix's first receipt
+     * (sent / delivered / read) fills this row, every later receipt adds its own row.
+     * Only if Karix rejected the send (no mid — no receipt will ever come) it is saved as FAILED.
      */
     private void recordOutbound(Session session, String messageType, String text, String mid) {
         try {
@@ -1987,7 +1997,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .phone(session.getPhone())
                     .direction(DIR_OUTBOUND)
                     .karixMessageId(mid)
-                    .status(mid != null ? MSG_STATUS_SENT : MSG_STATUS_FAILED)
+                    .status(mid != null ? null : MSG_STATUS_FAILED)   // null until Karix's first receipt
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType(messageType)
