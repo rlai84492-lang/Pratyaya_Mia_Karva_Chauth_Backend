@@ -38,4 +38,14 @@ public interface SessionRepository extends JpaRepository<Session, Long> {
     long countByPathAndIsActiveTrue(String path);
 
     long countByCurrentStepAndIsActiveTrue(String currentStep);
+
+    /** User ka aakhri session kisi path par (active ho ya band). */
+    Optional<Session> findFirstByPhoneAndPathOrderByIdDesc(String phone, String path);
+
+
+    /** User ka aakhri session kisi path par (active ho ya band). */
+//    Optional<Session> findFirstByPhoneAndPathOrderByIdDesc(String phone, String path);
+
+    /** User ka aakhri session, koi bhi path (occasion templates ke liye). */
+    Optional<Session> findFirstByPhoneOrderByIdDesc(String phone);
 }
