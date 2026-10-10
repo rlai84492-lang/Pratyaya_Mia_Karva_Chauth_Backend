@@ -108,9 +108,10 @@ public class BotEngineServiceImple implements BotEngineService {
     // TODO: replace with Karva Chauth images from the Mia team. These are the Rakhi images — fine for testing.
     private static final String IMG = "https://titanwatchimages123.blob.core.windows.net/miarakhi/";
 
+
     private static final String[][] CATEGORIES = {
             {"PEND", "Pendants",            "Dainty to dazzling – a piece for everyday wear",  IMG + "Pendants.png"},
-            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      IMG + "Pendants.png"}, // TODO: real image
+            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      IMG + "mangalshutra.png"},
             {"PNCH", "Pendant & Chain",     "Ready-to-wear sets, chain included",              IMG + "Pendant%20&%20Chain.png"},
             {"NECK", "Necklaces",           "For the days that call for a little extra shine", IMG + "Necklaces.png"},
             {"EARR", "Earrings",            "Studs & drops that do all the talking",           IMG + "Earrings.png"},
@@ -725,19 +726,19 @@ public class BotEngineServiceImple implements BotEngineService {
                         + "we'll make sure he knows exactly what to gift you this Karwa Chauth.";
                 buttons = List.of(
                         new String[]{"W_CHOOSE_MY_GIFT", "💛 Choose my gift"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             case TEMPLATE_HUSBAND -> {
                 text = "Let's find her something she'll cherish. Shall we take a look together?";
                 buttons = List.of(
                         new String[]{"H_FIND_HER_GIFT", "💛 Find her a gift"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             case TEMPLATE_SPARKLE -> {
                 text = "Who needs an occasion anyway? Let's find something beautiful for you. ✨";
                 buttons = List.of(
                         new String[]{"S_SHOW_ME", "✨ Show me"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             default -> {
                 log.warn("startFromOpener: unknown path={}", path);
@@ -1368,7 +1369,7 @@ public class BotEngineServiceImple implements BotEngineService {
             String mid = karixService.sendButtonMessage(session.getPhone(), text,
                     List.of(
                             new String[]{"ANOTHER_CATEGORY", "Another category"},
-                            new String[]{"BTN_STORE_FINDER", "Visit nearby store"}));
+                            new String[]{"BTN_STORE_FINDER", "📍 Visit Store"}));
             recordOutbound(session, "interactive", text, mid);
             log.warn("stage=NO_PRODUCTS sessionId={} category={}", session.getId(), category);
             return mid != null;
@@ -1464,7 +1465,7 @@ public class BotEngineServiceImple implements BotEngineService {
             text = "That's everything in *" + title + "* for now. Explore another?";
         }
         buttons.add(new String[]{"ANOTHER_CATEGORY", "Another category"});
-        buttons.add(new String[]{"BTN_STORE_FINDER", "Visit nearby store"});   // → C2
+        buttons.add(new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});   // → C2
 
         String mid = karixService.sendButtonMessage(session.getPhone(), text, buttons);
         recordOutbound(session, "interactive", text, mid);
@@ -1614,7 +1615,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * The button opens wa.me/?text=..., which shows WhatsApp's own contact picker with the
      * hint pre-filled — she picks her husband and taps send. (Same approach as the Rakhi bot.)
      */
-    // Send Ishara Now give product link  ========================= Pratyaya [Date-10/10/26]========================================
+    // Send Ishara Now give product link changed ========================= Pratyaya Date-10/1========================================
     private boolean sendIshara(Session session) {
         List<WishlistItem> items = wishlistItemRepository.findBySessionIdOrderByAddedAtAsc(session.getId());
 
