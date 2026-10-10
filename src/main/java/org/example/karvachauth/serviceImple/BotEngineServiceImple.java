@@ -96,8 +96,7 @@ public class BotEngineServiceImple implements BotEngineService {
     /**
      * Seconds between the Ishara (1G) and "Want to see them in person?" (1H).
      * WhatsApp doesn't tell us when she taps a URL button, so 1H is sent after a pause instead.
-     * 15s for testing — 20-30s is more natural in production.
-     */
+    **/
     private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
@@ -1615,6 +1614,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * The button opens wa.me/?text=..., which shows WhatsApp's own contact picker with the
      * hint pre-filled — she picks her husband and taps send. (Same approach as the Rakhi bot.)
      */
+    // Send Ishara Now give product link  ========================= Pratyaya [Date-10/10/26]========================================
     private boolean sendIshara(Session session) {
         List<WishlistItem> items = wishlistItemRepository.findBySessionIdOrderByAddedAtAsc(session.getId());
 
@@ -1634,33 +1634,48 @@ public class BotEngineServiceImple implements BotEngineService {
                 .findBySkuIn(items.stream().map(WishlistItem::getSku).toList())
                 .stream()
                 .collect(Collectors.toMap(Product::getSku, product -> product, (first, second) -> first));
+        String shareHeader = "Karwa Chauth is here, and I'm keeping my fast for you, as always 🌙\n\n"
+                + "Here's my Ishara – just in case you're wondering what would make me smile, "
+                + "here are a few ideas:\n\n";
+        String previewStart = "Here's your Ishara, ready to share with him 👇\n\n";
+        String previewEnd = "\n\nWhen you're ready - one tap sends it across on WhatsApp.";
+        int fixedLength = previewStart.length() + shareHeader.length() + previewEnd.length();
+
         StringBuilder lines = new StringBuilder();
         int shown = 0;
         for (WishlistItem item : items) {
             if (shown >= MAX_HINT_ITEMS) break;
             Product prod = productsBySku.get(item.getSku());
             if (prod == null) continue;
-            lines.append("• *").append(prod.getName()).append("*");
-            if (prod.getPrice() != null) lines.append(" - ≈₹").append(formatInr(prod.getPrice()));
-            lines.append("\n");
+
+            String buyLink = (prod.getBuyLink() == null || prod.getBuyLink().isBlank())
+                    ? HINT_BROWSE_LINK
+                    : prod.getBuyLink().trim();
+            StringBuilder piece = new StringBuilder();
+            piece.append("• *").append(prod.getName()).append("*");
+            if (prod.getPrice() != null) piece.append(" - ≈₹").append(formatInr(prod.getPrice()));
+            piece.append("\n");
+            piece.append("Browse online: ").append(buyLink).append("\n\n");
+
+            int remainingAfterThisPiece = items.size() - (shown + 1);
+            String moreLine = remainingAfterThisPiece > 0
+                    ? "+" + remainingAfterThisPiece
+                    : "";
+            if (fixedLength + lines.length() + piece.length() + moreLine.length() > 1024) break;
+
+            lines.append(piece);
             shown++;
         }
         int remaining = items.size() - shown;
         if (remaining > 0) {
-            lines.append("+ ").append(remaining).append(" more on my list 💛\n");
+            lines.append("+").append(remaining).append("\n");
         }
 
         // 2. The text HE will receive
-        String shareText = "Karwa Chauth is here, and I'm keeping my fast for you, as always 🌙\n\n"
-                + "Here's my Ishara – just in case you're wondering what would make me smile, "
-                + "here are a few ideas:\n"
-                + lines
-                + "\nBrowse online: " + HINT_BROWSE_LINK;
+        String shareText = shareHeader + lines.toString().stripTrailing();
 
         // 3. What SHE sees: intro + preview of the hint + follow-up line
-        String preview = "Here's your Ishara, ready to share with him 👇\n\n"
-                + shareText
-                + "\n\nWhen you're ready - one tap sends it across on WhatsApp.";
+        String preview = previewStart + shareText + previewEnd;
         if (preview.length() > 1024) {
             log.warn("stage=ISHARA_TOO_LONG sessionId={} length={} — WhatsApp may reject it", session.getId(), preview.length());
         }
@@ -1689,6 +1704,7 @@ public class BotEngineServiceImple implements BotEngineService {
         scheduleStoreInvite(session.getId());
         return true;
     }
+    //--=======================================Changes Ended=======================================================
 
     /** Sends 1H a few seconds after 1G — but only if she's still on 1G. */
     private void scheduleStoreInvite(Long sessionId) {
