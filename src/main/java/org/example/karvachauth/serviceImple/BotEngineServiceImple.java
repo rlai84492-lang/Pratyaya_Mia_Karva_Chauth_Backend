@@ -1,5 +1,6 @@
 package org.example.karvachauth.serviceImple;
 
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.karvachauth.entity.Customer;
@@ -43,6 +44,14 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.example.karvachauth.constants.KarvaChauthConstants.*;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -121,7 +130,31 @@ public class BotEngineServiceImple implements BotEngineService {
     //
     // So until she taps one of those two buttons she shows as OPENER everywhere.
     // ==================================================================
+    /** "karva chauth" / "karwa chauth" / "karvachauth" / "Karwa Chouth"… type kare toh opener. */
+    /** Pura message sirf ye shabd ho toh journey shuru: wife / husband / sparkle. */
+    private static final java.util.regex.Pattern KARVA_KEYWORD =
+            java.util.regex.Pattern.compile("kar[vw]a+ch[ao]u?th");
+    private static final String KEYWORD_PAYLOAD_PREFIX = "KW_";
+    private static final int KEYWORD_MAX_LENGTH = 40;
 
+    /** Typed text -> journey path, ya null. Exact word match, taaki naam/date wale jawab journey na todein. */
+    private static String keywordPath(String text) {
+        if (text == null || text.length() > KEYWORD_MAX_LENGTH) return null;
+        String w = text.toLowerCase().replaceAll("[^a-z]", "");
+        return switch (w) {
+            case "wife"    -> TEMPLATE_WIFE;
+            case "husband" -> TEMPLATE_HUSBAND;
+            case "sparkle" -> TEMPLATE_SPARKLE;
+            // "karva chauth" -> Wife. Nahi chahiye toh ye line hata do:
+            default        -> KARVA_KEYWORD.matcher(w).matches() ? TEMPLATE_WIFE : null;
+        };
+    }
+
+//    private static boolean isOpenerKeyword(String text) {
+//        if (text == null || text.length() > KEYWORD_MAX_LENGTH) return false;   // lambe jawab journey nahi todenge
+//        String letters = text.toLowerCase().replaceAll("[^a-z]", "");
+//        return OPENER_KEYWORD.matcher(letters).find();
+//    }
     /**
      * The Step 0 template — sent from the Karix portal, not by us, so we first see it when its first
      * delivery receipt reaches the webhook. Saves the customer, a session on OPENER and the template
@@ -138,6 +171,32 @@ public class BotEngineServiceImple implements BotEngineService {
             log.warn("recordOpenerTemplate: missing phone/mid");
             return;
         }
+
+//        // Re-engagement template opener nahi hai — naya OPENER session mat banao
+//        Reminder reminder = resolveReminder(templateId);
+//        if (reminder != null) {
+//            try {
+//                recordReminderTemplate(to, reminder, mid, templateId, status, errorCode, errorReason);
+//            } catch (Exception e) {
+//                log.error("Failed to record reminder template mid={}", mid, e);
+//            }
+//            return;
+//        }
+
+        // Re-engagement / occasion template: apne session par save, naya OPENER session mat banao.
+        // OPENER_NO_TAP (path null) opener jaisa hi hai -> neeche wala normal opener logic chalne do.
+        Reminder reengagement = resolveReminder(templateId);
+        if (reengagement != null && reengagement.path() != PATH_OPENER) {
+            try {
+                recordReminderTemplate(to, reengagement, mid, templateId, status, errorCode, errorReason);
+            } catch (Exception e) {
+                log.error("Failed to record reminder template mid={}", mid, e);
+            }
+            return;
+        }
+
+
+
         try {
             Customer customer = findOrCreateCustomer(to);
             boolean failed = MSG_STATUS_FAILED.equals(status);
@@ -182,6 +241,459 @@ public class BotEngineServiceImple implements BotEngineService {
         }
     }
 
+
+    // ==================================================================
+    // RE-ENGAGEMENT / OCCASION TEMPLATES (Karix campaign)
+    //
+    // Karix template bhejta hai -> user button dabata hai -> PAYLOAD hamare server par aata hai
+    // -> us journey ka session wapas active -> wahi PURANA function aage chalta hai.
+    //
+    // Naya template: (1) Reminder banao, (2) REMINDERS mein daalo, (3) resolveReminder() mein case.
+    // ==================================================================
+
+    /** Reminder.path ke special values */
+    private static final String PATH_OPENER = null;   // opener jaisa: buttons = opener payloads (step0Path handle karta hai)
+    private static final String PATH_ANY    = "*";    // koi bhi journey: aakhri session; naya user -> Sparkle
+
+    /**
+     * @param path    TEMPLATE_WIFE / TEMPLATE_HUSBAND / TEMPLATE_SPARKLE, ya PATH_OPENER / PATH_ANY
+     * @param step    DB / dashboard mein is template ka step naam
+     * @param body    test message: {name} = ", Priya" (ya khaali), {days} = Karwa Chauth tak din
+     * @param buttons {payload, buttonTitle, realPayload} — tap par realPayload ka flow chalta hai
+     */
+    private record Reminder(String path, String step, String body, String[][] buttons) { }
+
+    // ---------- 1. Wife: list bana, Ishara nahi bheja ----------
+    private static final Reminder W_LIST_STARTED = new Reminder(
+            TEMPLATE_WIFE, "W_REMINDER_LIST_STARTED",
+            "Your Ishara's almost ready{name} ✨\n"
+                    + "You've already picked out pieces you love - all that's left is turning them into a hint he can't miss. "
+                    + "Only {days} days to Karwa Chauth.\n"
+                    + "Finish sharing your Ishara now, so he knows exactly what to get you this year.",
+            new String[][]{
+                    {"W_REMINDER_SHARE_ISHARA", "💌 Share my Ishara", "W_SEND_ISHARA"},
+                    {"W_REMINDER_VISIT_STORE",  "Visit Store",        "BTN_STORE_FINDER"}});
+
+    // ---------- 2. Wife: Ishara bheja, phir chali gayi ----------
+    private static final Reminder W_HINT_SENT = new Reminder(
+            TEMPLATE_WIFE, "W_REMINDER_HINT_SENT",
+            "You've done your part{name} 🌙\n"
+                    + "Your Ishara's with him now - he knows exactly what to get you. "
+                    + "If he hasn't picked up on it yet, a quick resend keeps it top of mind.\n"
+                    + "Want to see it up close yourself? You're always welcome to swing by a Mia store - no rush, no reason needed.",
+            new String[][]{
+                    {"W_REMINDER_RESEND_ISHARA", "Resend my Ishara", "W_SEND_ISHARA"},
+                    {"W_REMINDER_SEE_IN_PERSON", "See it in person", "BTN_STORE_FINDER"}});
+
+    // ---------- 3. Husband: budget chuna, Buy Online / Visit Store nahi ----------
+    private static final Reminder H_BUDGET_PICKED = new Reminder(
+            TEMPLATE_HUSBAND, "H_REMINDER_BUDGET_PICKED",
+            "Still deciding{name}? 💛\n"
+                    + "You were this close to picking something she'd love - don't let it slip past Karwa Chauth. "
+                    + "Complete it online, or walk into a Mia store and see it in person.\n"
+                    + "Only {days} days left to make her day special.",
+            new String[][]{
+                    {"H_REMINDER_BUY_ONLINE",  "Buy Online",  "IDLE_BROWSE_AGAIN"},
+                    {"H_REMINDER_VISIT_STORE", "Visit Store", "BTN_STORE_FINDER"}});
+
+    // ---------- 4. Sparkle: Add to my list kiya, phir chali gayi ----------
+    private static final Reminder S_LIST_ADDED = new Reminder(
+            TEMPLATE_SPARKLE, "S_REMINDER_LIST_ADDED",
+            "That piece is still waiting for you{name} ✨\n"
+                    + "You added it to your list, and it's every bit as beautiful as when you found it. "
+                    + "Come see it in person - book a quick visit and it'll be set aside, just for you.\n"
+                    + "Only a few days left for this festive season.",
+            new String[][]{
+                    {"S_REMINDER_VISIT_STORE",   "Visit Store",   "BTN_STORE_FINDER"},
+                    {"S_REMINDER_KEEP_BROWSING", "Keep browsing", "IDLE_BROWSE_AGAIN"}});
+
+    // ---------- 5. Opener mila, koi button nahi dabaya (buttons = opener ke hi payloads) ----------
+    private static final Reminder OPENER_NO_TAP = new Reminder(
+            PATH_OPENER, "OPENER_REMINDER",
+            "Karwa Chauth is only {days} days away{name} ✨\n"
+                    + "Still haven't found the piece that says it all? Your Ishara's ready whenever you are.\n"
+                    + "Pick a path, and let's find something beautiful - for her, or for you.",
+            new String[][]{
+                    {"BTN_CELEBRATING",      "💛 I'm celebrating",  "BTN_CELEBRATING"},
+                    {"BTN_SHOPPING_FOR_HER", "🎁 Shopping for her", "BTN_SHOPPING_FOR_HER"},
+                    {"BTN_SPARKLE",          "✨ Here for sparkle",  "BTN_SPARKLE"}});
+
+    // ---------- 6. Occasion: Happy Karwa Chauth ----------
+    private static final Reminder OCCASION_KARWA_CHAUTH = new Reminder(
+            PATH_ANY, "OCCASION_KARWA_CHAUTH",
+            "Happy Karwa Chauth{name}! 🌙\n"
+                    + "Wishing you and your partner a day filled with warmth and grace, from all of us at Mia.",
+            new String[][]{
+                    {"OCCASION_VISIT_STORE", "📍 Visit store", "BTN_STORE_FINDER"}});
+
+    // ---------- 7. Occasion: Festive season ----------
+    private static final Reminder OCCASION_FESTIVE = new Reminder(
+            PATH_ANY, "OCCASION_FESTIVE",
+            "Wishing you a sparkling festive season{name}! ✨ "
+                    + "Here's to treating yourself to something beautiful this season, from all of us at Mia.",
+            new String[][]{
+                    {"OCCASION_VISIT_STORE", "📍 Visit store", "BTN_STORE_FINDER"}});
+
+    private static final List<Reminder> REMINDERS = List.of(
+            W_LIST_STARTED, W_HINT_SENT, H_BUDGET_PICKED, S_LIST_ADDED,
+            OPENER_NO_TAP, OCCASION_KARWA_CHAUTH, OCCASION_FESTIVE);
+
+    /** reminder button payload -> Reminder / asli payload. Opener-type yahan nahi (step0Path handle karta hai). */
+    private static final Map<String, Reminder> REMINDER_BY_PAYLOAD = new HashMap<>();
+    private static final Map<String, String> REMINDER_REAL_PAYLOAD = new HashMap<>();
+
+    static {
+        for (Reminder r : REMINDERS) {
+            if (r.path() == PATH_OPENER) continue;
+            for (String[] b : r.buttons()) {
+                REMINDER_BY_PAYLOAD.put(b[0], r);
+                REMINDER_REAL_PAYLOAD.put(b[0], b[2]);
+            }
+        }
+    }
+
+    @Value("${karvachauth.karwa-chauth-date:2026-10-29}")
+    private String karwaChauthDate;
+
+    /**
+     * Karix template ID (delivery receipt ka "templateId") -> Reminder. Sirf yahan likhe IDs allowed hain.
+     * Testing: yahi text WhatsApp par type karo -> wahi message aata hai.
+     * TODO: har case mein Karix ka ASLI template ID bhi daalo (lowercase).
+     */
+    private Reminder resolveReminder(String templateId) {
+        if (templateId == null || templateId.isBlank()) return null;
+        return switch (templateId.trim().toLowerCase(Locale.ROOT)) {
+            case "list started, hint not sent", "list_started_hint_not_sent"             -> W_LIST_STARTED;
+            case "hint sent", "hint_sent"                                                 -> W_HINT_SENT;
+            case "budget picked", "budget_picked"                                         -> H_BUDGET_PICKED;
+            case "sparkle list added", "sparkle_list_added"                               -> S_LIST_ADDED;
+            case "opener delivered, no interaction", "opener_delivered_no_interaction"   -> OPENER_NO_TAP;
+            case "happy karwa chauth wishes", "happy_karwa_chauth_wishes"                 -> OCCASION_KARWA_CHAUTH;
+            case "festive season wishes", "festive_season_wishes"                         -> OCCASION_FESTIVE;
+            default -> null;
+        };
+    }
+
+    /** {name} -> ", Priya" (naam nahi toh khaali), {days} -> Karwa Chauth tak bache din. */
+    private String fillReminderText(String body, String customerName) {
+        long days;
+        try {
+            days = Math.max(0, ChronoUnit.DAYS.between(
+                    LocalDate.now(ZoneId.of("Asia/Kolkata")), LocalDate.parse(karwaChauthDate.trim())));
+        } catch (Exception e) {
+            log.warn("karvachauth.karwa-chauth-date invalid: {}", karwaChauthDate);
+            days = 0;
+        }
+        String name = (customerName == null || customerName.isBlank()) ? "" : ", " + customerName.trim();
+        return body.replace("{name}", name).replace("{days}", String.valueOf(days));
+    }
+
+    /** Aakhri session: path diya hai toh usi path ka, warna (opener / any) koi bhi. */
+    private Optional<Session> lastSession(String to, String path) {
+        return (path == null || PATH_ANY.equals(path))
+                ? sessionRepository.findFirstByPhoneOrderByIdDesc(to)
+                : sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, path);
+    }
+
+    /**
+     * Journey dobara chalu.
+     *  - PATH_ANY: active session hai toh wahi, warna aakhri session wapas active.
+     *  - path diya: active usi path ka toh wahi, warna us path ka aakhri session wapas + doosri journey band.
+     */
+    private Optional<Session> resumeSession(String to, String path) {
+        Optional<Session> active = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+        if (active.isPresent() && active.get().getPath() != null
+                && (PATH_ANY.equals(path) || path.equals(active.get().getPath()))) {
+            return active;
+        }
+        Optional<Session> last = PATH_ANY.equals(path)
+                ? sessionRepository.findFirstByPhoneOrderByIdDesc(to).filter(s -> s.getPath() != null)
+                : sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, path);
+        if (last.isEmpty()) {
+            return Optional.empty();
+        }
+        Session s = last.get();
+        active.filter(other -> !other.getId().equals(s.getId())).ifPresent(other -> {
+            other.setIsActive(false);
+            sessionRepository.save(other);
+            log.info("stage=SESSION_CLOSED sessionId={} reason=REMINDER oldPath={}", other.getId(), other.getPath());
+        });
+        s.setIsActive(true);
+        s.setLastInboundAt(LocalDateTime.now());
+        s.setIdleNudgeSent(false);
+        sessionRepository.save(s);
+        log.info("stage=SESSION_RESUMED sessionId={} path={} step={}", s.getId(), s.getPath(), s.getCurrentStep());
+        return Optional.of(s);
+    }
+
+    /** Naya user occasion template ka button dabaye -> Sparkle path ka naya session (store visit ke liye). */
+    private Session newSparkleSession(String to) {
+        Customer customer = findOrCreateCustomer(to);
+        sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to).ifPresent(other -> {
+            other.setIsActive(false);
+            sessionRepository.save(other);
+        });
+        Session s = sessionRepository.save(Session.builder()
+                .customerId(customer.getId())
+                .phone(to)
+                .path(TEMPLATE_SPARKLE)
+                .currentStep(STEP_OPENER)
+                .build());
+        log.info("stage=SESSION_CREATED sessionId={} path=SPARKLE reason=OCCASION_TEMPLATE", s.getId());
+        return s;
+    }
+
+    /** Karix ne template bheja (pehli delivery receipt) -> aakhri session par save (session active nahi karte). */
+    private void recordReminderTemplate(String to, Reminder r, String mid, String templateId,
+                                        String status, String errorCode, String errorReason) {
+        Customer customer = findOrCreateCustomer(to);
+        Long sessionId = lastSession(to, r.path()).map(Session::getId).orElse(null);
+        boolean failed = MSG_STATUS_FAILED.equals(status);
+        messageRepository.save(Message.builder()
+                .customerId(customer.getId())
+                .sessionId(sessionId)
+                .phone(to)
+                .direction(DIR_OUTBOUND)
+                .karixMessageId(mid)
+                .status(status)
+                .step(r.step())
+                .messageType("template")
+                .templateName(templateId)
+                .errorCode(failed ? errorCode : null)
+                .errorReason(failed && errorReason != null
+                        ? errorReason.substring(0, Math.min(errorReason.length(), 500)) : null)
+                .statusUpdatedAt(LocalDateTime.now())
+                .build());
+        log.info("stage=REMINDER_TEMPLATE_RECORDED step={} customerId={} sessionId={} status={}",
+                r.step(), customer.getId(), sessionId, status);
+    }
+
+    /** TEST: template ka naam type karo -> wahi message free-form (24h window ke andar) aata hai. */
+    private boolean sendReminderTest(String to, Reminder r) {
+        Customer customer = findOrCreateCustomer(to);
+        Long sessionId = lastSession(to, r.path()).map(Session::getId).orElse(null);
+
+        String body = fillReminderText(r.body(), customer.getName());
+        List<String[]> buttons = Arrays.stream(r.buttons())
+                .map(b -> new String[]{b[0], b[1]})
+                .toList();
+        String mid = karixService.sendButtonMessage(to, body, buttons);
+
+        messageRepository.save(Message.builder()
+                .customerId(customer.getId())
+                .sessionId(sessionId)
+                .phone(to)
+                .direction(DIR_OUTBOUND)
+                .karixMessageId(mid)
+                .status(mid != null ? MSG_STATUS_SENT : MSG_STATUS_FAILED)
+                .step(r.step())
+                .messageType("button")
+                .statusUpdatedAt(LocalDateTime.now())
+                .build());
+        log.info("stage=REMINDER_TEST_SENT step={} sessionId={} sent={}", r.step(), sessionId, mid != null);
+        return mid != null;
+    }
+
+//
+//    // ==================================================================
+//    // RE-ENGAGEMENT TEMPLATES (Karix campaign)
+//    //
+//    // User journey beech mein chhod deti hai -> Karix ek template bhejta hai -> uske button par
+//    // us path ka aakhri session wapas active hota hai, aur wahi PURANA function aage chalta hai.
+//    //
+//    // Naya template: (1) neeche ek Reminder banao, (2) REMINDERS mein daalo, (3) resolveReminder() mein case.
+//    // ==================================================================
+//
+//    /**
+//     * @param path    kaunsi journey (TEMPLATE_WIFE / TEMPLATE_HUSBAND / TEMPLATE_SPARKLE)
+//     * @param step    dashboard / DB mein is reminder ka step naam
+//     * @param body    test message ka text: {name} = ", Priya" (ya khaali), {days} = Karwa Chauth tak din
+//     * @param buttons {reminderPayload, buttonTitle, realPayload} — tap par realPayload ka flow chalta hai
+//     */
+//    private record Reminder(String path, String step, String body, String[][] buttons) { }
+//
+//    /** Wife — list bana li, Ishara nahi bheja */
+//    private static final Reminder W_LIST_STARTED = new Reminder(
+//            TEMPLATE_WIFE, "W_REMINDER_LIST_STARTED",
+//            "Your Ishara's almost ready{name} ✨\n"
+//                    + "You've already picked out pieces you love - all that's left is turning them into a hint he can't miss. "
+//                    + "Only {days} days to Karwa Chauth.\n"
+//                    + "Finish sharing your Ishara now, so he knows exactly what to get you this year.",
+//            new String[][]{
+//                    {"W_REMINDER_SHARE_ISHARA", "💌 Share my Ishara", "W_SEND_ISHARA"},
+//                    {"W_REMINDER_VISIT_STORE",  "Visit Store",        "BTN_STORE_FINDER"}});
+//
+//    /** Wife — Ishara bhej diya, phir chali gayi */
+//    private static final Reminder W_HINT_SENT = new Reminder(
+//            TEMPLATE_WIFE, "W_REMINDER_HINT_SENT",
+//            "You've done your part{name} 🌙\n"
+//                    + "Your Ishara's with him now - he knows exactly what to get you. "
+//                    + "If he hasn't picked up on it yet, a quick resend keeps it top of mind.\n"
+//                    + "Want to see it up close yourself? You're always welcome to swing by a Mia store - no rush, no reason needed.",
+//            new String[][]{
+//                    {"W_REMINDER_RESEND_ISHARA", "Resend my Ishara", "W_SEND_ISHARA"},
+//                    {"W_REMINDER_SEE_IN_PERSON", "See it in person", "BTN_STORE_FINDER"}});
+//
+//    /** Husband — budget chuna, phir Buy Online / Visit Store nahi dabaya */
+//    private static final Reminder H_BUDGET_PICKED = new Reminder(
+//            TEMPLATE_HUSBAND, "H_REMINDER_BUDGET_PICKED",
+//            "Still deciding{name}? 💛\n"
+//                    + "You were this close to picking something she'd love - don't let it slip past Karwa Chauth. "
+//                    + "Complete it online, or walk into a Mia store and see it in person.\n"
+//                    + "Only {days} days left to make her day special.",
+//            new String[][]{
+//                    {"H_REMINDER_BUY_ONLINE",  "Buy Online",  "IDLE_BROWSE_AGAIN"},   // usi category + budget ke products
+//                    {"H_REMINDER_VISIT_STORE", "Visit Store", "BTN_STORE_FINDER"}});
+//
+//    private static final List<Reminder> REMINDERS = List.of(W_LIST_STARTED, W_HINT_SENT, H_BUDGET_PICKED);
+//
+//    /** reminder button payload -> uska Reminder */
+//    private static final Map<String, Reminder> REMINDER_BY_PAYLOAD = new HashMap<>();
+//    /** reminder button payload -> asli journey payload */
+//    private static final Map<String, String> REMINDER_REAL_PAYLOAD = new HashMap<>();
+//
+//    static {
+//        for (Reminder r : REMINDERS) {
+//            for (String[] b : r.buttons()) {
+//                REMINDER_BY_PAYLOAD.put(b[0], r);
+//                REMINDER_REAL_PAYLOAD.put(b[0], b[2]);
+//            }
+//        }
+//    }
+//
+//    @Value("${karvachauth.karwa-chauth-date:2026-10-29}")
+//    private String karwaChauthDate;
+//
+//    /**
+//     * Karix template ID (delivery receipt ka "templateId") -> Reminder.
+//     * Testing: yahi text WhatsApp par type karo -> wahi reminder message aata hai.
+//     */
+//    private Reminder resolveReminder(String templateId) {
+//        if (templateId == null || templateId.isBlank()) return null;
+//        return switch (templateId.trim().toLowerCase(Locale.ROOT)) {
+//            // Wife — list bana, Ishara nahi bheja
+//            case "list started, hint not sent", "list_started_hint_not_sent" -> W_LIST_STARTED;
+//            // Wife — Ishara bheja, phir chali gayi            TODO: Karix ka asli template ID yahan
+//            case "hint sent", "hint_sent" -> W_HINT_SENT;
+//            // Husband — budget chuna, aage nahi badha          TODO: Karix ka asli template ID yahan
+//            case "budget picked", "budget_picked" -> H_BUDGET_PICKED;
+//            default -> null;
+//        };
+//    }
+//
+//    /** {name} -> ", Priya" (naam nahi toh khaali), {days} -> Karwa Chauth tak bache din. */
+//    private String fillReminderText(String body, String customerName) {
+//        long days;
+//        try {
+//            days = Math.max(0, ChronoUnit.DAYS.between(
+//                    LocalDate.now(ZoneId.of("Asia/Kolkata")), LocalDate.parse(karwaChauthDate.trim())));
+//        } catch (Exception e) {
+//            log.warn("karvachauth.karwa-chauth-date invalid: {}", karwaChauthDate);
+//            days = 0;
+//        }
+//        String name = (customerName == null || customerName.isBlank()) ? "" : ", " + customerName.trim();
+//        return body.replace("{name}", name).replace("{days}", String.valueOf(days));
+//    }
+//
+//    /**
+//     * Us path ki journey dobara chalu: active session usi path ka hai toh wahi;
+//     * warna us path ka aakhri session wapas active, aur doosri active journey band.
+//     */
+//    private Optional<Session> resumeSession(String to, String path) {
+//        Optional<Session> active = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+//        if (active.isPresent() && path.equals(active.get().getPath())) {
+//            return active;
+//        }
+//        Optional<Session> last = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, path);
+//        if (last.isEmpty()) {
+//            return Optional.empty();
+//        }
+//        active.ifPresent(other -> {
+//            other.setIsActive(false);
+//            sessionRepository.save(other);
+//            log.info("stage=SESSION_CLOSED sessionId={} reason=REMINDER oldPath={}", other.getId(), other.getPath());
+//        });
+//        Session s = last.get();
+//        s.setIsActive(true);
+//        s.setLastInboundAt(LocalDateTime.now());
+//        s.setIdleNudgeSent(false);
+//        sessionRepository.save(s);
+//        log.info("stage=SESSION_RESUMED sessionId={} path={} step={}", s.getId(), path, s.getCurrentStep());
+//        return Optional.of(s);
+//    }
+//
+//    /** Karix ne reminder template bheja (pehli delivery receipt) -> us path ke aakhri session par save. */
+//    private void recordReminderTemplate(String to, Reminder r, String mid, String templateId,
+//                                        String status, String errorCode, String errorReason) {
+//        Customer customer = findOrCreateCustomer(to);
+//        Long sessionId = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, r.path())
+//                .map(Session::getId).orElse(null);
+//        boolean failed = MSG_STATUS_FAILED.equals(status);
+//        messageRepository.save(Message.builder()
+//                .customerId(customer.getId())
+//                .sessionId(sessionId)
+//                .phone(to)
+//                .direction(DIR_OUTBOUND)
+//                .karixMessageId(mid)
+//                .status(status)
+//                .step(r.step())
+//                .messageType("template")
+//                .templateName(templateId)
+//                .errorCode(failed ? errorCode : null)
+//                .errorReason(failed && errorReason != null
+//                        ? errorReason.substring(0, Math.min(errorReason.length(), 500)) : null)
+//                .statusUpdatedAt(LocalDateTime.now())
+//                .build());
+//        log.info("stage=REMINDER_TEMPLATE_RECORDED step={} customerId={} sessionId={} status={}",
+//                r.step(), customer.getId(), sessionId, status);
+//    }
+//
+//    /** TEST: template ka naam type karo -> wahi message free-form (24h window ke andar) aata hai. */
+//    private boolean sendReminderTest(String to, Reminder r) {
+//        Customer customer = findOrCreateCustomer(to);
+//        Long sessionId = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, r.path())
+//                .map(Session::getId).orElse(null);
+//
+//        String body = fillReminderText(r.body(), customer.getName());
+//        List<String[]> buttons = Arrays.stream(r.buttons())
+//                .map(b -> new String[]{b[0], b[1]})
+//                .toList();
+//        String mid = karixService.sendButtonMessage(to, body, buttons);
+//
+//        messageRepository.save(Message.builder()
+//                .customerId(customer.getId())
+//                .sessionId(sessionId)
+//                .phone(to)
+//                .direction(DIR_OUTBOUND)
+//                .karixMessageId(mid)
+//                .status(mid != null ? MSG_STATUS_SENT : MSG_STATUS_FAILED)
+//                .step(r.step())
+//                .messageType("button")
+//                .statusUpdatedAt(LocalDateTime.now())
+//                .build());
+//        log.info("stage=REMINDER_TEST_SENT step={} sessionId={} sent={}", r.step(), sessionId, mid != null);
+//        return mid != null;
+//    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     /**
      * She tapped a Step 0 button ("I'm celebrating" / "Shopping for her" / "Here for the sparkle").
      *
@@ -203,6 +715,8 @@ public class BotEngineServiceImple implements BotEngineService {
             log.warn("startFromOpener: invalid phone");
             return;
         }
+
+
 
         String text;
         List<String[]> buttons;
@@ -280,6 +794,8 @@ public class BotEngineServiceImple implements BotEngineService {
         startFromOpener(phone, name, TEMPLATE_SPARKLE, null, null);
     }
 
+
+
     @Override
     public boolean onButtonTap(String phone, String path, String payload) {
         lastOutbound.remove();
@@ -291,13 +807,59 @@ public class BotEngineServiceImple implements BotEngineService {
         // Carousel buttons come back with "_<cardIndex>" appended (CAT_PEND_0) — strip it before routing
         String p = payload.trim().replaceAll("_\\d+$", "");
 
-        // Load the user's active session — its path decides the journey
-        Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+//        // Re-engagement template ka button -> us path ka aakhri session wapas, phir asli payload ka flow
+//        Reminder reminder = REMINDER_BY_PAYLOAD.get(p);
+//        Optional<Session> found = reminder != null
+//                ? resumeSession(to, reminder.path())
+//                : sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+//
+//        if (found.isEmpty()) {
+//            if (reminder != null) {
+//                // Is path par kabhi journey hi nahi ki -> shuru se
+//                log.info("stage=REMINDER_NO_SESSION path={} — starting journey", reminder.path());
+//                startFromOpener(to, null, reminder.path(), payload.trim(), null);
+//                return true;
+//            }
+//            log.warn("stage=NO_ACTIVE_SESSION payload={} — send the opener first", p);
+//            return false;
+//        }
+//
+//        Session session = found.get();
+//        if (reminder != null) {
+//            String real = REMINDER_REAL_PAYLOAD.get(p);
+//            log.info("stage=REMINDER_TAP sessionId={} step={} payload={} -> {}", session.getId(), reminder.step(), p, real);
+//            p = real;   // W_SEND_ISHARA / BTN_STORE_FINDER / IDLE_BROWSE_AGAIN -> purana flow aage chalega
+//        }
+
+
+        // Re-engagement / occasion template ka button -> journey wapas, phir asli payload ka flow
+        Reminder reminder = REMINDER_BY_PAYLOAD.get(p);
+        Optional<Session> found = reminder != null
+                ? resumeSession(to, reminder.path())
+                : sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+
         if (found.isEmpty()) {
-            log.warn("stage=NO_ACTIVE_SESSION payload={} — send the opener first", p);
-            return false;
+            if (reminder != null && PATH_ANY.equals(reminder.path())) {
+                // Occasion template, naya user -> Sparkle session, phir neeche store visit chalega
+                found = Optional.of(newSparkleSession(to));
+            } else if (reminder != null) {
+                // Is journey par kabhi aayi hi nahi -> shuru se
+                log.info("stage=REMINDER_NO_SESSION path={} — starting journey", reminder.path());
+                startFromOpener(to, null, reminder.path(), payload.trim(), null);
+                return true;
+            } else {
+                log.warn("stage=NO_ACTIVE_SESSION payload={} — send the opener first", p);
+                return false;
+            }
         }
         Session session = found.get();
+        if (reminder != null) {
+            String real = REMINDER_REAL_PAYLOAD.get(p);
+            log.info("stage=REMINDER_TAP sessionId={} step={} payload={} -> {}", session.getId(), reminder.step(), p, real);
+            p = real;   // W_SEND_ISHARA / BTN_STORE_FINDER / IDLE_BROWSE_AGAIN -> purana flow aage chalega
+        }
+
+
         if (path != null && !path.equals(session.getPath())) {
             log.warn("stage=PATH_MISMATCH requested={} session={} — using the session's path", path, session.getPath());
         }
@@ -480,6 +1042,15 @@ public class BotEngineServiceImple implements BotEngineService {
         }
     }
 
+    /**
+     * Karva Chauth opener: "How lovely! …" + [Choose my gift] [Visit nearby store].
+     * /test (template=opener) yahi call karta hai. Real keyword wala raasta onTextMessage() mein hai.
+     */
+    @Override
+    public void sendOpener(String phone, String name) {
+        startFromOpener(phone, name, TEMPLATE_WIFE, null, null);
+    }
+
     // ==================================================================
     // TYPED REPLIES — answers to questions (1J on the Wife path, 2F on the Husband path)
     // ==================================================================
@@ -488,6 +1059,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * A typed message (not a button). Only steps that ask a question expect one;
      * anywhere else it's logged and ignored.
      */
+    @Transactional
     @Override
     public boolean onTextMessage(String phone, String text) {
         lastOutbound.remove();
@@ -496,14 +1068,34 @@ public class BotEngineServiceImple implements BotEngineService {
             log.warn("onTextMessage: missing phone/text");
             return false;
         }
+        String answer = text.trim();
 
+        // TEST: template ka naam type karo ("List started, hint not sent") -> wahi reminder
+        Reminder testReminder = resolveReminder(answer);
+        if (testReminder != null) {
+            log.info("stage=REMINDER_TEST_TRIGGER step={}", testReminder.step());
+            return sendReminderTest(to, testReminder);
+        }
+
+        // ---------- Keyword -> us journey ka opener ----------
+        // "wife" -> Wife, "husband" -> Husband, "sparkle" -> Sparkle, "karva chauth" -> Wife.
+        // Session check se PEHLE: naye user ka koi session nahi hota.
+        // startFromOpener() purani journey band karke nayi OPENER session banata hai,
+        // ye text tap ki tarah save karta hai (payload KW_<PATH>), aur us journey ka pehla message bhejta hai.
+        String keywordPath = keywordPath(answer);
+        if (keywordPath != null) {
+            log.info("stage=KEYWORD_OPENER path={}", keywordPath);
+            startFromOpener(to, null, keywordPath, KEYWORD_PAYLOAD_PREFIX + keywordPath, answer);
+            return true;
+        }
+
+        // ---------- Pending question ka jawab ----------
         Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
         if (found.isEmpty()) {
             log.warn("stage=NO_ACTIVE_SESSION type=text — send the opener first");
             return false;
         }
         Session session = found.get();
-        String answer = text.trim();
 
         recordInboundText(session, answer);
         session.setLastInboundAt(LocalDateTime.now());
@@ -528,6 +1120,9 @@ public class BotEngineServiceImple implements BotEngineService {
         sessionRepository.save(session);
         return handled;
     }
+
+
+
 
     // ==================================================================
     // STEP 1A / 2A — category carousel

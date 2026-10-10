@@ -7,6 +7,10 @@ public interface KarvaChauthWebhookService {
     /** Validate -> identify event -> publish to Service Bus -> return result. */
     WebhookResult handleWebhook(String eventId, String rawBody, String token);
 
+
+
+
+
     enum WebhookResult {
         ACCEPTED(HttpStatus.OK),                      // accepted
         IGNORED(HttpStatus.OK),                       // empty / not JSON / too large -> 200 so Karix doesn't retry garbage
@@ -19,4 +23,12 @@ public interface KarvaChauthWebhookService {
 
         public HttpStatus getHttpStatus() { return httpStatus; }
     }
+
+
+
+    /** Queue consumer -> inbound (button / text / location). Exception = Service Bus retry. */
+    void processQueuedInbound(String eventId, String rawBody) throws Exception;
+
+    /** Queue consumer -> delivery receipt. Exception = Service Bus retry. */
+    void processQueuedStatus(String eventId, String rawBody) throws Exception;
 }
