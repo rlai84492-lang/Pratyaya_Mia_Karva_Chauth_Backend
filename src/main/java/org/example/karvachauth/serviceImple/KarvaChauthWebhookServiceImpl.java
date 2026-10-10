@@ -986,9 +986,12 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
         Optional<Message> found = messageRepository.findFirstByKarixMessageId(mid);
         if (found.isPresent()) {
             Message m = found.get();
-            int current = STATUS_RANK.getOrDefault(m.getStatus(), 0);
-            if (STATUS_RANK.get(status) <= current) return;
+//            int current = STATUS_RANK.getOrDefault(m.getStatus(), 0);
+            int current = m.getStatus() == null ? 0 : STATUS_RANK.getOrDefault(m.getStatus(), 0);
+//            if (STATUS_RANK.get(status) <= current) return;
+            if (STATUS_RANK.getOrDefault(status, 0) <= current) return;
             m.setStatus(status);
+
             m.setStatusUpdatedAt(LocalDateTime.now());
             if (MSG_STATUS_FAILED.equals(status)) {
                 m.setErrorCode(code);
