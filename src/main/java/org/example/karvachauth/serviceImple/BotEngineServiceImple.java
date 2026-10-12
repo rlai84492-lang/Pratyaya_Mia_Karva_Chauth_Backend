@@ -272,7 +272,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Finish sharing your Ishara now, so he knows exactly what to get you this year.",
             new String[][]{
                     {"W_REMINDER_SHARE_ISHARA", "💌 Share my Ishara", "W_SEND_ISHARA"},
-                    {"W_REMINDER_VISIT_STORE",  "Visit Store",        "BTN_STORE_FINDER"}});
+                    {"W_REMINDER_VISIT_STORE",  "📍 Visit store",        "BTN_STORE_FINDER"}});
 
     // ---------- 2. Wife: Ishara bheja, phir chali gayi ----------
     private static final Reminder W_HINT_SENT = new Reminder(
@@ -282,8 +282,8 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "If he hasn't picked up on it yet, a quick resend keeps it top of mind.\n"
                     + "Want to see it up close yourself? You're always welcome to swing by a Mia store - no rush, no reason needed.",
             new String[][]{
-                    {"W_REMINDER_RESEND_ISHARA", "Resend my Ishara", "W_SEND_ISHARA"},
-                    {"W_REMINDER_SEE_IN_PERSON", "See it in person", "BTN_STORE_FINDER"}});
+                    {"W_REMINDER_RESEND_ISHARA", "\uD83D\uDC8C Resend my Ishara", "W_SEND_ISHARA"},
+                    {"W_REMINDER_SEE_IN_PERSON", "\uD83D\uDC40 See it in person", "BTN_STORE_FINDER"}});
 
     // ---------- 3. Husband: budget chuna, Buy Online / Visit Store nahi ----------
     private static final Reminder H_BUDGET_PICKED = new Reminder(
@@ -293,8 +293,8 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Complete it online, or walk into a Mia store and see it in person.\n"
                     + "Only {days} days left to make her day special.",
             new String[][]{
-                    {"H_REMINDER_BUY_ONLINE",  "Buy Online",  "IDLE_BROWSE_AGAIN"},
-                    {"H_REMINDER_VISIT_STORE", "Visit Store", "BTN_STORE_FINDER"}});
+                    {"H_REMINDER_BUY_ONLINE",  "\uD83D\uDECD Buy Online",  "IDLE_BROWSE_AGAIN"},
+                    {"H_REMINDER_VISIT_STORE", "📍 Visit store", "BTN_STORE_FINDER"}});
 
     // ---------- 4. Sparkle: Add to my list kiya, phir chali gayi ----------
     private static final Reminder S_LIST_ADDED = new Reminder(
@@ -304,7 +304,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Come see it in person - book a quick visit and it'll be set aside, just for you.\n"
                     + "Only a few days left for this festive season.",
             new String[][]{
-                    {"S_REMINDER_VISIT_STORE",   "Visit Store",   "BTN_STORE_FINDER"},
+                    {"S_REMINDER_VISIT_STORE",   "📍 Visit store",   "BTN_STORE_FINDER"},
                     {"S_REMINDER_KEEP_BROWSING", "Keep browsing", "IDLE_BROWSE_AGAIN"}});
 
     // ---------- 5. Opener mila, koi button nahi dabaya (buttons = opener ke hi payloads) ----------
@@ -1785,7 +1785,7 @@ public class BotEngineServiceImple implements BotEngineService {
 
     /** 1I (Wife) — after "Maybe later" on 1H, or after a C2 booking. */
     private boolean wifeReinforce(Session session) {
-        String text = "Shall I remind you closer to your anniversary, with something special?";
+        String text = "Shall I remind him closer to your anniversary, with something special?";
 
         String mid = karixService.sendButtonMessage(session.getPhone(), text,
                 List.of(
