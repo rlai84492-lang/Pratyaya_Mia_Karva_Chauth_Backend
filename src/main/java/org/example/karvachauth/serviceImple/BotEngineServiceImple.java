@@ -100,7 +100,7 @@ public class BotEngineServiceImple implements BotEngineService {
     private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
-    private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 10;
+    private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 20;
 
     // TODO: confirm the "Browse online" link for the hint with the Mia team
     private static final String HINT_BROWSE_LINK = "https://www.miabytanishq.com/";
