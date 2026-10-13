@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
         @Index(name = "idx_messages_karix_id", columnList = "karixMessageId"),
         @Index(name = "idx_messages_phone_created", columnList = "phone, createdAt"),
         @Index(name = "idx_messages_created", columnList = "createdAt"),
-        @Index(name = "idx_messages_session ",columnList = "id, sessionId")
+        @Index(name = "idx_messages_session",columnList = "id, sessionId")
 })
 @Getter
 @Setter

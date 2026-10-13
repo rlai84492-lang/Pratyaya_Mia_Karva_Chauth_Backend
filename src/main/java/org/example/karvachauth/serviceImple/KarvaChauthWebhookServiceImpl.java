@@ -568,7 +568,6 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -599,10 +598,6 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
 
     /** Thread-safe, shared. Spring Boot 4 has no Jackson-2 bean, so one is created here. */
     private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    /** Status order — a late "delivered" must never overwrite "read". */
-    private static final Map<String, Integer> STATUS_RANK = Map.of(
-            MSG_STATUS_SENT, 1, MSG_STATUS_DELIVERED, 2, MSG_STATUS_READ, 3, MSG_STATUS_FAILED, 4);
 
     private static final String EV_INBOUND = "INBOUND_MESSAGE";
     private static final String EV_STATUS  = "DELIVERY_STATUS";
@@ -792,8 +787,9 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
                     final String code = text(notification, "code");
                     final String reason = text(notification, "reason");
                     final String tpl = firstText(text(root, "templateId"), null);   // "" on bot messages -> null
+                    final String karixTimestamp = text(root.path("events"), "timestamp");   // epoch millis, when it happened
                     laneFor(phone != null ? phone : mid)
-                            .execute(() -> processStatus(eventId, mid, phone, status, code, reason, tpl));
+                            .execute(() -> processStatus(eventId, mid, phone, status, code, reason, tpl, karixTimestamp));
                 }
             } catch (RejectedExecutionException full) {
                 // Lane full (huge spike) -> 503, Karix retries later. Nothing silently dropped.
@@ -865,7 +861,8 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
         MDC.put("eventId", eventId);
         try {
             handleStatus(mid, digits(text(root.path("recipient"), "to")), text(n, "status"),
-                    text(n, "code"), text(n, "reason"), firstText(text(root, "templateId"), null));
+                    text(n, "code"), text(n, "reason"), firstText(text(root, "templateId"), null),
+                    text(root.path("events"), "timestamp"));
         } finally {
             MDC.clear();
         }
@@ -888,10 +885,10 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
     }
 
     private void processStatus(String eventId, String mid, String phone, String rawStatus,
-                               String code, String reason, String templateId) {
+                               String code, String reason, String templateId, String karixTimestamp) {
         MDC.put("eventId", eventId);
         try {
-            handleStatus(mid, phone, rawStatus, code, reason, templateId);
+            handleStatus(mid, phone, rawStatus, code, reason, templateId, karixTimestamp);
         } catch (Exception e) {
             log.error("stage=STATUS_FAILED eventId={} mid={}", eventId, mid, e);
         } finally {
@@ -976,38 +973,90 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
         if (providerMessageId != null) markProcessed(providerMessageId);
     }
 
-    /** Delivery receipt: SENT -> DELIVERED -> READ / FAILED. Never moves backwards. */
+    /**
+     * One Karix receipt (sent / delivered / read / failed) for one of our messages.
+     *
+     * Every status comes from Karix and gets its OWN row in messages — nothing is overwritten:
+     *   - the bot saves the message with NO status when it sends it;
+     *   - Karix's first receipt fills that row's status;
+     *   - every later receipt adds a new row — a copy of the original message (same karix_message_id,
+     *     session, step, text) with that receipt's status.
+     * status_updated_at = when Karix says it happened (events.timestamp).
+     *
+     * Karix sends receipts out of order (read can come before delivered) and sometimes twice —
+     * a status already saved for this message is skipped, so each status is stored once.
+     */
     private void handleStatus(String mid, String phone, String rawStatus,
-                              String code, String reason, String templateId) {
+                              String code, String reason, String templateId, String karixTimestamp) {
         String status = mapStatus(rawStatus);
         if (status == null) {
             log.debug("stage=STATUS_SKIPPED mid={} rawStatus={}", mid, rawStatus);
             return;
         }
-
-        Optional<Message> found = messageRepository.findFirstByKarixMessageId(mid);
-        if (found.isPresent()) {
-            Message m = found.get();
-//            int current = STATUS_RANK.getOrDefault(m.getStatus(), 0);
-            int current = m.getStatus() == null ? 0 : STATUS_RANK.getOrDefault(m.getStatus(), 0);
-//            if (STATUS_RANK.get(status) <= current) return;
-            if (STATUS_RANK.getOrDefault(status, 0) <= current) return;
-            m.setStatus(status);
-
-            m.setStatusUpdatedAt(LocalDateTime.now());
-            if (MSG_STATUS_FAILED.equals(status)) {
-                m.setErrorCode(code);
-                m.setErrorReason(reason == null ? null : reason.substring(0, Math.min(reason.length(), 500)));
-            }
-            messageRepository.save(m);
-            log.debug("stage=STATUS_UPDATED mid={} status={} code={}", mid, status, code);
-
-        } else if (templateId != null && phone != null) {
-            // Step 0 template (sent from the Karix portal) — first receipt saves customer + OPENER session
-            botEngineService.recordOpenerTemplate(phone, mid, templateId, status, code, reason);
-        } else {
-            log.debug("stage=STATUS_NO_MATCH mid={} status={}", mid, status);
+        if (messageRepository.existsByKarixMessageIdAndStatus(mid, status)) {
+            log.debug("stage=STATUS_ALREADY_SAVED mid={} status={}", mid, status);
+            return;
         }
+
+        Optional<Message> found = messageRepository.findFirstByKarixMessageIdOrderByIdAsc(mid);
+        if (found.isEmpty()) {
+            if (templateId != null && phone != null) {
+                // Step 0 template (sent from the Karix portal) — its first receipt saves customer + OPENER session
+                // (with this status); its other receipts become rows below
+                botEngineService.recordOpenerTemplate(phone, mid, templateId, status, code, reason);
+            } else {
+                log.debug("stage=STATUS_NO_MATCH mid={} status={}", mid, status);
+            }
+            return;
+        }
+
+        Message original = found.get();
+        boolean failed = MSG_STATUS_FAILED.equals(status);
+        String errorReason = failed && reason != null ? reason.substring(0, Math.min(reason.length(), 500)) : null;
+
+        if (original.getStatus() == null) {
+            // First receipt for a message the bot sent — it goes on the bot's own row
+            original.setStatus(status);
+            original.setStatusUpdatedAt(toLocalTime(karixTimestamp));
+            if (failed) {
+                original.setErrorCode(code);
+                original.setErrorReason(errorReason);
+            }
+            messageRepository.save(original);
+            log.debug("stage=STATUS_ROW_SAVED mid={} status={} code={} firstReceipt=true", mid, status, code);
+            return;
+        }
+
+        // Every later receipt — its own row, a copy of the original message
+        messageRepository.save(Message.builder()
+                .customerId(original.getCustomerId())
+                .sessionId(original.getSessionId())
+                .phone(original.getPhone())
+                .direction(original.getDirection())
+                .karixMessageId(mid)
+                .status(status)
+                .step(original.getStep())
+                .path(original.getPath())
+                .messageType(original.getMessageType())
+                .templateName(original.getTemplateName())
+                .contentText(original.getContentText())
+                .errorCode(failed ? code : null)
+                .errorReason(errorReason)
+                .statusUpdatedAt(toLocalTime(karixTimestamp))
+                .build());
+        log.debug("stage=STATUS_ROW_SAVED mid={} status={} code={} firstReceipt=false", mid, status, code);
+    }
+
+    /** Karix events.timestamp ("1791523711000", epoch millis) -> local time. Now, if it's missing or bad. */
+    private static LocalDateTime toLocalTime(String epochMillis) {
+        try {
+            if (epochMillis != null && !epochMillis.isBlank()) {
+                return LocalDateTime.ofInstant(Instant.ofEpochMilli(Long.parseLong(epochMillis.trim())), ZoneId.systemDefault());
+            }
+        } catch (NumberFormatException e) {
+            // fall through
+        }
+        return LocalDateTime.now();
     }
 
     /** Location she shared — printed only for now (C2 store search comes later). */

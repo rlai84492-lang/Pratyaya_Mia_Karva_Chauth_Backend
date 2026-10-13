@@ -41,4 +41,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     long countByDirectionAndStatus(String direction, String status);
 
     long countByDirectionAndCreatedAtBetween(String direction, LocalDateTime from, LocalDateTime to);
+
+    /** True if she sent anything (tap / text) in this session after this time. */
+    boolean existsBySessionIdAndDirectionAndCreatedAtAfter(Long sessionId, String direction, LocalDateTime after);
 }
