@@ -31,8 +31,8 @@ public class Product {
 
     private Integer price;               // in rupees
 
-    @Column(length = 20)
-    private String metal;
+    @Column(length = 50)
+    private String collections;
 
     @Column(length = 500)
     private String imageUrl;             // must be a public HTTPS URL for carousel headers

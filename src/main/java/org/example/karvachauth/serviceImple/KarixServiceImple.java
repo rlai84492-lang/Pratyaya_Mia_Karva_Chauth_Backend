@@ -38,14 +38,31 @@ public class KarixServiceImple implements KarixService {
     private String webhookDnId;
 
 
+//    public KarixServiceImple(ObjectMapper objectMapper,
+//                             @Value("${karvachauth.karix.connect-timeout-ms:3000}") int connectTimeoutMs,
+//                             @Value("${karvachauth.karix.read-timeout-ms:10000}") int readTimeoutMs) {
+//        this.objectMapper = objectMapper;
+//        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+//                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+//        factory.setConnectTimeout(connectTimeoutMs);
+//        factory.setReadTimeout(readTimeoutMs);
+//        this.restTemplate = new RestTemplate(factory);
+//    }
+
     public KarixServiceImple(ObjectMapper objectMapper,
                              @Value("${karvachauth.karix.connect-timeout-ms:3000}") int connectTimeoutMs,
                              @Value("${karvachauth.karix.read-timeout-ms:10000}") int readTimeoutMs) {
         this.objectMapper = objectMapper;
-        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
-                new org.springframework.http.client.SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(connectTimeoutMs);
-        factory.setReadTimeout(readTimeoutMs);
+
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                .version(java.net.http.HttpClient.Version.HTTP_1_1)   // Karix + mock dono HTTP/1.1
+                .connectTimeout(java.time.Duration.ofMillis(connectTimeoutMs))
+                .build();
+
+        org.springframework.http.client.JdkClientHttpRequestFactory factory =
+                new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(java.time.Duration.ofMillis(readTimeoutMs));
+
         this.restTemplate = new RestTemplate(factory);
     }
 

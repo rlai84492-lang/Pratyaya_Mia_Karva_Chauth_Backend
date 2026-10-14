@@ -10,15 +10,21 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
+ * All dashboard native queries. Anchored to Lead only so Spring Data recognises
+ * this as a JPA repository; every method here is a native query.
  *
-
+ * Common parameters:
+ *   path -> 'WIFE' / 'HUSBAND' / 'SPARKLE' (TEMPLATE_* constants), or NULL for all paths
+ *   from -> inclusive start of the window
+ *   to   -> exclusive end of the window (start of the day after the last day)
+ *
  * Two kinds of window:
  *   - EVENT queries (metric cards, outcomes, activity) count things that HAPPENED in the window.
  *   - FUNNEL queries (bot flow drop-off) follow the sessions that STARTED in the window
  *     (sessions.started_at), so every stage is a subset of "Opener" and never goes above 100%.
  *
  * How the bot records data (BotEngineServiceImple):
- *   - The Step 0 templates first delivery receipt creates a session on OPENER with NO path.
+ *   - The Step 0 template's first delivery receipt creates a session on OPENER with NO path.
  *     When she taps a Step 0 button the path is set — so "path IS NOT NULL" = she tapped Step 0.
  *     (If she was mid-journey, the tap closes that session and starts a new one with the path.)
  *   - Every message is saved on the step it puts her on: a tap that IS a step ("Choose my gift",
@@ -34,10 +40,13 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     // ==================================================================
     // METRIC CARDS — outbound messages (event window)
     // Step 0 campaign templates have no path, so they appear under "all" only.
+    // A message has one row per status (SENT, DELIVERED, READ …) with the same karix_message_id,
+    // so each message is counted once: a message that was read counts as sent, delivered and read.
+    // A row with no karix_message_id (Karix rejected the send) counts on its own.
     // ==================================================================
 
     @Query(nativeQuery = true, value =
-            "SELECT COUNT(*) FROM messages m " +
+            "SELECT COUNT(DISTINCT COALESCE(m.karix_message_id, CONCAT('row-', m.id))) FROM messages m " +
                     "WHERE m.direction = 'OUTBOUND' " +
                     "  AND m.status IN (:statuses) " +
                     "  AND (:path IS NULL OR m.path = :path) " +
@@ -380,7 +389,9 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
      *
      *   step         : where she got to. For a finished journey (current_step = 'CLOSED') it is the step
      *                  she finished from — the step of her last message before the goodbye
-     *                  (moveTo saves the goodbye itself on CLOSED).
+     *                  (moveTo saves the goodbye itself on CLOSED). Karix status rows (later copies of a
+     *                  message with the same karix_message_id) are skipped, so a late READ receipt for an
+     *                  older message can't change it.
      *   sessionState : COMPLETED   — the journey reached E1 (CLOSED)
      *                  OPEN        — still going
      *                  ENDED       — closed without finishing (a new Step 0 tap started a new session)
@@ -391,6 +402,10 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "       CASE WHEN s.current_step = 'CLOSED' " +
                     "            THEN (SELECT m.step FROM messages m " +
                     "                  WHERE m.session_id = s.id AND m.step <> 'CLOSED' " +
+                    // skip Karix status rows (DELIVERED / READ copies of an earlier message, added later)
+                    "                    AND NOT EXISTS (SELECT 1 FROM messages earlier " +
+                    "                                    WHERE earlier.karix_message_id = m.karix_message_id " +
+                    "                                      AND earlier.id < m.id) " +
                     "                  ORDER BY m.id DESC LIMIT 1) " +
                     "            ELSE s.current_step END AS step, " +
                     "       s.current_step AS currentStep, " +

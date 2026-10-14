@@ -15,7 +15,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "product_picks", indexes = {
         @Index(name = "idx_picks_sku", columnList = "sku"),
-        @Index(name = "idx_picks_action_created", columnList = "actionType, createdAt")
+        @Index(name = "idx_picks_action_created", columnList = "actionType, createdAt"),
+        @Index(name = "idx_picks_session",columnList = "sessionId")
 })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ProductPick {

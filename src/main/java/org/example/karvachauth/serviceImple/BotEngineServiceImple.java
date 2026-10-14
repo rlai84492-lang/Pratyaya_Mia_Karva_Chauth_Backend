@@ -1,6 +1,6 @@
 package org.example.karvachauth.serviceImple;
 
-import jakarta.transaction.Transactional;
+//import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.karvachauth.entity.Customer;
@@ -88,7 +88,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
-    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 2;
+    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 10;
 
     /** Max pieces listed in the Ishara (1G) — keeps the message under WhatsApp's 1024-char body limit. */
     private static final int MAX_HINT_ITEMS = 5;
@@ -96,8 +96,7 @@ public class BotEngineServiceImple implements BotEngineService {
     /**
      * Seconds between the Ishara (1G) and "Want to see them in person?" (1H).
      * WhatsApp doesn't tell us when she taps a URL button, so 1H is sent after a pause instead.
-     * 15s for testing — 20-30s is more natural in production.
-     */
+    **/
     private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
@@ -109,9 +108,10 @@ public class BotEngineServiceImple implements BotEngineService {
     // TODO: replace with Karva Chauth images from the Mia team. These are the Rakhi images — fine for testing.
     private static final String IMG = "https://titanwatchimages123.blob.core.windows.net/miarakhi/";
 
+
     private static final String[][] CATEGORIES = {
             {"PEND", "Pendants",            "Dainty to dazzling – a piece for everyday wear",  IMG + "Pendants.png"},
-            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      IMG + "Pendants.png"}, // TODO: real image
+            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      IMG + "mangalshutra.png"},
             {"PNCH", "Pendant & Chain",     "Ready-to-wear sets, chain included",              IMG + "Pendant%20&%20Chain.png"},
             {"NECK", "Necklaces",           "For the days that call for a little extra shine", IMG + "Necklaces.png"},
             {"EARR", "Earrings",            "Studs & drops that do all the talking",           IMG + "Earrings.png"},
@@ -272,7 +272,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Finish sharing your Ishara now, so he knows exactly what to get you this year.",
             new String[][]{
                     {"W_REMINDER_SHARE_ISHARA", "💌 Share my Ishara", "W_SEND_ISHARA"},
-                    {"W_REMINDER_VISIT_STORE",  "Visit Store",        "BTN_STORE_FINDER"}});
+                    {"W_REMINDER_VISIT_STORE",  "📍 Visit store",        "BTN_STORE_FINDER"}});
 
     // ---------- 2. Wife: Ishara bheja, phir chali gayi ----------
     private static final Reminder W_HINT_SENT = new Reminder(
@@ -282,8 +282,8 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "If he hasn't picked up on it yet, a quick resend keeps it top of mind.\n"
                     + "Want to see it up close yourself? You're always welcome to swing by a Mia store - no rush, no reason needed.",
             new String[][]{
-                    {"W_REMINDER_RESEND_ISHARA", "Resend my Ishara", "W_SEND_ISHARA"},
-                    {"W_REMINDER_SEE_IN_PERSON", "See it in person", "BTN_STORE_FINDER"}});
+                    {"W_REMINDER_RESEND_ISHARA", "\uD83D\uDC8C Resend my Ishara", "W_SEND_ISHARA"},
+                    {"W_REMINDER_SEE_IN_PERSON", "\uD83D\uDC40 See it in person", "BTN_STORE_FINDER"}});
 
     // ---------- 3. Husband: budget chuna, Buy Online / Visit Store nahi ----------
     private static final Reminder H_BUDGET_PICKED = new Reminder(
@@ -293,8 +293,8 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Complete it online, or walk into a Mia store and see it in person.\n"
                     + "Only {days} days left to make her day special.",
             new String[][]{
-                    {"H_REMINDER_BUY_ONLINE",  "Buy Online",  "IDLE_BROWSE_AGAIN"},
-                    {"H_REMINDER_VISIT_STORE", "Visit Store", "BTN_STORE_FINDER"}});
+                    {"H_REMINDER_BUY_ONLINE",  "\uD83D\uDECD Buy Online",  "IDLE_BROWSE_AGAIN"},
+                    {"H_REMINDER_VISIT_STORE", "📍 Visit store", "BTN_STORE_FINDER"}});
 
     // ---------- 4. Sparkle: Add to my list kiya, phir chali gayi ----------
     private static final Reminder S_LIST_ADDED = new Reminder(
@@ -304,7 +304,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     + "Come see it in person - book a quick visit and it'll be set aside, just for you.\n"
                     + "Only a few days left for this festive season.",
             new String[][]{
-                    {"S_REMINDER_VISIT_STORE",   "Visit Store",   "BTN_STORE_FINDER"},
+                    {"S_REMINDER_VISIT_STORE",   "📍 Visit store",   "BTN_STORE_FINDER"},
                     {"S_REMINDER_KEEP_BROWSING", "Keep browsing", "IDLE_BROWSE_AGAIN"}});
 
     // ---------- 5. Opener mila, koi button nahi dabaya (buttons = opener ke hi payloads) ----------
@@ -726,19 +726,19 @@ public class BotEngineServiceImple implements BotEngineService {
                         + "we'll make sure he knows exactly what to gift you this Karwa Chauth.";
                 buttons = List.of(
                         new String[]{"W_CHOOSE_MY_GIFT", "💛 Choose my gift"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             case TEMPLATE_HUSBAND -> {
                 text = "Let's find her something she'll cherish. Shall we take a look together?";
                 buttons = List.of(
                         new String[]{"H_FIND_HER_GIFT", "💛 Find her a gift"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             case TEMPLATE_SPARKLE -> {
                 text = "Who needs an occasion anyway? Let's find something beautiful for you. ✨";
                 buttons = List.of(
                         new String[]{"S_SHOW_ME", "✨ Show me"},
-                        new String[]{"BTN_STORE_FINDER", "Visit nearby store"});
+                        new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});
             }
             default -> {
                 log.warn("startFromOpener: unknown path={}", path);
@@ -1059,7 +1059,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * A typed message (not a button). Only steps that ask a question expect one;
      * anywhere else it's logged and ignored.
      */
-    @Transactional
+//    @Transactional
     @Override
     public boolean onTextMessage(String phone, String text) {
         lastOutbound.remove();
@@ -1369,7 +1369,7 @@ public class BotEngineServiceImple implements BotEngineService {
             String mid = karixService.sendButtonMessage(session.getPhone(), text,
                     List.of(
                             new String[]{"ANOTHER_CATEGORY", "Another category"},
-                            new String[]{"BTN_STORE_FINDER", "Visit nearby store"}));
+                            new String[]{"BTN_STORE_FINDER", "📍 Visit Store"}));
             recordOutbound(session, "interactive", text, mid);
             log.warn("stage=NO_PRODUCTS sessionId={} category={}", session.getId(), category);
             return mid != null;
@@ -1465,7 +1465,7 @@ public class BotEngineServiceImple implements BotEngineService {
             text = "That's everything in *" + title + "* for now. Explore another?";
         }
         buttons.add(new String[]{"ANOTHER_CATEGORY", "Another category"});
-        buttons.add(new String[]{"BTN_STORE_FINDER", "Visit nearby store"});   // → C2
+        buttons.add(new String[]{"BTN_STORE_FINDER", "📍 Visit Store"});   // → C2
 
         String mid = karixService.sendButtonMessage(session.getPhone(), text, buttons);
         recordOutbound(session, "interactive", text, mid);
@@ -1615,6 +1615,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * The button opens wa.me/?text=..., which shows WhatsApp's own contact picker with the
      * hint pre-filled — she picks her husband and taps send. (Same approach as the Rakhi bot.)
      */
+    // Send Ishara Now give product link changed ========================= Pratyaya Date-10/1========================================
     private boolean sendIshara(Session session) {
         List<WishlistItem> items = wishlistItemRepository.findBySessionIdOrderByAddedAtAsc(session.getId());
 
@@ -1634,33 +1635,48 @@ public class BotEngineServiceImple implements BotEngineService {
                 .findBySkuIn(items.stream().map(WishlistItem::getSku).toList())
                 .stream()
                 .collect(Collectors.toMap(Product::getSku, product -> product, (first, second) -> first));
+        String shareHeader = "Karwa Chauth is here, and I'm keeping my fast for you, as always 🌙\n\n"
+                + "Here's my Ishara – just in case you're wondering what would make me smile, "
+                + "here are a few ideas:\n\n";
+        String previewStart = "Here's your Ishara, ready to share with him 👇\n\n";
+        String previewEnd = "\n\nWhen you're ready - one tap sends it across on WhatsApp.";
+        int fixedLength = previewStart.length() + shareHeader.length() + previewEnd.length();
+
         StringBuilder lines = new StringBuilder();
         int shown = 0;
         for (WishlistItem item : items) {
             if (shown >= MAX_HINT_ITEMS) break;
             Product prod = productsBySku.get(item.getSku());
             if (prod == null) continue;
-            lines.append("• *").append(prod.getName()).append("*");
-            if (prod.getPrice() != null) lines.append(" - ≈₹").append(formatInr(prod.getPrice()));
-            lines.append("\n");
+
+            String buyLink = (prod.getBuyLink() == null || prod.getBuyLink().isBlank())
+                    ? HINT_BROWSE_LINK
+                    : prod.getBuyLink().trim();
+            StringBuilder piece = new StringBuilder();
+            piece.append("• *").append(prod.getName()).append("*");
+            if (prod.getPrice() != null) piece.append(" - ≈₹").append(formatInr(prod.getPrice()));
+            piece.append("\n");
+            piece.append("Browse online: ").append(buyLink).append("\n\n");
+
+            int remainingAfterThisPiece = items.size() - (shown + 1);
+            String moreLine = remainingAfterThisPiece > 0
+                    ? "+" + remainingAfterThisPiece
+                    : "";
+            if (fixedLength + lines.length() + piece.length() + moreLine.length() > 1024) break;
+
+            lines.append(piece);
             shown++;
         }
         int remaining = items.size() - shown;
         if (remaining > 0) {
-            lines.append("+ ").append(remaining).append(" more on my list 💛\n");
+            lines.append("+").append(remaining).append("\n");
         }
 
         // 2. The text HE will receive
-        String shareText = "Karwa Chauth is here, and I'm keeping my fast for you, as always 🌙\n\n"
-                + "Here's my Ishara – just in case you're wondering what would make me smile, "
-                + "here are a few ideas:\n"
-                + lines
-                + "\nBrowse online: " + HINT_BROWSE_LINK;
+        String shareText = shareHeader + lines.toString().stripTrailing();
 
         // 3. What SHE sees: intro + preview of the hint + follow-up line
-        String preview = "Here's your Ishara, ready to share with him 👇\n\n"
-                + shareText
-                + "\n\nWhen you're ready - one tap sends it across on WhatsApp.";
+        String preview = previewStart + shareText + previewEnd;
         if (preview.length() > 1024) {
             log.warn("stage=ISHARA_TOO_LONG sessionId={} length={} — WhatsApp may reject it", session.getId(), preview.length());
         }
@@ -1689,6 +1705,7 @@ public class BotEngineServiceImple implements BotEngineService {
         scheduleStoreInvite(session.getId());
         return true;
     }
+    //--=======================================Changes Ended=======================================================
 
     /** Sends 1H a few seconds after 1G — but only if she's still on 1G. */
     private void scheduleStoreInvite(Long sessionId) {
@@ -1768,7 +1785,7 @@ public class BotEngineServiceImple implements BotEngineService {
 
     /** 1I (Wife) — after "Maybe later" on 1H, or after a C2 booking. */
     private boolean wifeReinforce(Session session) {
-        String text = "Shall I remind you closer to your anniversary, with something special?";
+        String text = "Shall I remind him closer to your anniversary, with something special?";
 
         String mid = karixService.sendButtonMessage(session.getPhone(), text,
                 List.of(
@@ -2436,15 +2453,21 @@ public class BotEngineServiceImple implements BotEngineService {
     /**
      * Links her latest Step 0 template message (saved when its receipt came in, before any session
      * existed) to the session her tap just started — so the session's messages begin at Step 0.
+     * Every status row of that template (sent / delivered / read) is linked, not just one.
      */
     private void linkOpenerTemplate(Session session) {
         try {
             messageRepository.findFirstByPhoneAndMessageTypeAndSessionIdIsNullOrderByIdDesc(session.getPhone(), "template")
                     .ifPresent(template -> {
-                        template.setSessionId(session.getId());
-                        if (template.getCustomerId() == null) template.setCustomerId(session.getCustomerId());
-                        if (template.getStep() == null) template.setStep(STEP_OPENER);
-                        messageRepository.save(template);
+                        List<Message> rows = template.getKarixMessageId() == null
+                                ? List.of(template)
+                                : messageRepository.findByKarixMessageId(template.getKarixMessageId());
+                        for (Message row : rows) {
+                            row.setSessionId(session.getId());
+                            if (row.getCustomerId() == null) row.setCustomerId(session.getCustomerId());
+                            if (row.getStep() == null) row.setStep(STEP_OPENER);
+                        }
+                        messageRepository.saveAll(rows);
                     });
         } catch (Exception e) {
             log.error("Failed to link the Step 0 template sessionId={}", session.getId(), e);   // never break the flow
@@ -2540,7 +2563,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .sessionId(session.getId())
                     .phone(session.getPhone())
                     .direction(DIR_INBOUND)
-                    .status(MSG_STATUS_RECEIVED)
+                    .status(MSG_STATUS_READ)               // her message — saved as READ, same as the Rakhi project
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType("button")
@@ -2559,7 +2582,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .sessionId(session.getId())
                     .phone(session.getPhone())
                     .direction(DIR_INBOUND)
-                    .status(MSG_STATUS_RECEIVED)
+                    .status(MSG_STATUS_READ)               // her message — saved as READ, same as the Rakhi project
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType("text")
@@ -2571,8 +2594,12 @@ public class BotEngineServiceImple implements BotEngineService {
     }
 
     /**
-     * Our message, saved on the step the session is on now. Status starts as SENT, or FAILED if Karix
-     * rejected it. If the reply then moves the session on, moveTo() re-saves it on the new step.
+     * Our message, saved on the step the session is on now. If the reply then moves the session on,
+     * moveTo() re-saves it on the new step.
+     *
+     * Status is NOT set here — it comes only from Karix receipts (the webhook): Karix's first receipt
+     * (sent / delivered / read) fills this row, every later receipt adds its own row.
+     * Only if Karix rejected the send (no mid — no receipt will ever come) it is saved as FAILED.
      */
     private void recordOutbound(Session session, String messageType, String text, String mid) {
         try {
@@ -2582,7 +2609,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .phone(session.getPhone())
                     .direction(DIR_OUTBOUND)
                     .karixMessageId(mid)
-                    .status(mid != null ? MSG_STATUS_SENT : MSG_STATUS_FAILED)
+                    .status(mid != null ? null : MSG_STATUS_FAILED)   // null until Karix's first receipt
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType(messageType)

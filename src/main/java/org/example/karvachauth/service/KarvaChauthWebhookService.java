@@ -26,9 +26,16 @@ public interface KarvaChauthWebhookService {
 
 
 
-    /** Queue consumer -> inbound (button / text / location). Exception = Service Bus retry. */
-    void processQueuedInbound(String eventId, String rawBody) throws Exception;
+//    /** Queue consumer -> inbound (button / text / location). Exception = Service Bus retry. */
+//    void processQueuedInbound(String eventId, String rawBody) throws Exception;
+//
+//    /** Queue consumer -> delivery receipt. Exception = Service Bus retry. */
+//    void processQueuedStatus(String eventId, String rawBody) throws Exception;
 
-    /** Queue consumer -> delivery receipt. Exception = Service Bus retry. */
-    void processQueuedStatus(String eventId, String rawBody) throws Exception;
+
+    /** Queue consumer -> inbound. receivedAtEpochMs = when our webhook accepted it. */
+    void processQueuedInbound(String eventId, String rawBody, long receivedAtEpochMs) throws Exception;
+
+    /** Queue consumer -> delivery receipt. attempt = how many times it was re-queued (0 first time). */
+    void processQueuedStatus(String eventId, String rawBody, int attempt) throws Exception;
 }

@@ -11,6 +11,18 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     Optional<Message> findFirstByKarixMessageId(String karixMessageId);
 
+    /**
+     * The message as we first saved it — a message has one row per status (SENT, DELIVERED, READ …),
+     * all with the same karix_message_id; the lowest id is the original.
+     */
+    Optional<Message> findFirstByKarixMessageIdOrderByIdAsc(String karixMessageId);
+
+    /** True if this status is already saved for this message (Karix sends some receipts twice). */
+    boolean existsByKarixMessageIdAndStatus(String karixMessageId, String status);
+
+    /** Every status row of one message. */
+    List<Message> findByKarixMessageId(String karixMessageId);
+
     @Override
     List<Message> findAll();
 
