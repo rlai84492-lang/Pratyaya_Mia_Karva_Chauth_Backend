@@ -23,6 +23,7 @@ import org.example.karvachauth.repository.SessionRepository;
 import org.example.karvachauth.repository.WishlistItemRepository;
 import org.example.karvachauth.service.BotEngineService;
 import org.example.karvachauth.service.KarixService;
+import org.example.karvachauth.service.NearbyStoreService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,6 +66,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+
+import org.example.karvachauth.entity.MiaStore;
+
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -80,6 +85,11 @@ public class BotEngineServiceImple implements BotEngineService {
     private final ProductRepository productRepository;           // the catalogue — carousels, wishlist, Ishara, Buy Online
     private final BookingRepository bookingRepository;           // C2 store visits — PENDING (store picked) → CONFIRMED
     private final TaskScheduler taskScheduler;   // needs @EnableScheduling on the application class
+
+//    CHANGE 2: fields mein ADD karo (bookingRepository wali line ke neeche) ----------
+//    private final BookingRepository bookingRepository;           // (existing line — mat chhedo)
+    private final NearbyStoreService nearbyStoreService;         // NEW: KC ka apna store list (DT par depend nahi)
+
 
     // ---------- C2 — nearby store API ----------
     @Value("${karvachauth.store-api.url:https://tw-dashboard.centralindia.cloudapp.azure.com/api/dhanteras/store-names/nearby}")
@@ -1006,47 +1016,64 @@ public class BotEngineServiceImple implements BotEngineService {
      * Calls the nearby-store API: GET {url}?lat=..&lng=..&limit=3 with header X-Api-Key.
      * Returns {shortName, city} per store, nearest first. Empty list if the API fails — never throws.
      */
+//    private List<String[]> findNearbyStores(double lat, double lng) {
+//        if (storeApiKey == null || storeApiKey.isBlank()) {
+//            log.error("stage=STORE_API_NOT_CONFIGURED — set karvachauth.store-api.key");
+//            return List.of();
+//        }
+//        try {
+//            String url = storeApiUrl + "?lat=" + lat + "&lng=" + lng + "&limit=" + NEARBY_STORE_LIMIT;
+//            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+//                    .timeout(Duration.ofSeconds(8))
+//                    .header("X-Api-Key", storeApiKey)
+//                    .header("Accept", "application/json")
+//                    .GET()
+//                    .build();
+//            HttpResponse<String> response = STORE_HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+//            if (response.statusCode() != 200) {
+//                log.warn("stage=STORE_API_FAILED httpStatus={}", response.statusCode());
+//                return List.of();
+//            }
+//            JsonNode root = STORE_JSON.readTree(response.body());
+//            if (!root.path("success").asBoolean(false)) {
+//                log.warn("stage=STORE_API_FAILED success=false");
+//                return List.of();
+//            }
+//            List<String[]> stores = new ArrayList<>();
+//            for (JsonNode store : root.path("stores")) {
+//                String name = store.path("shortName").asText("").trim();
+//                String city = store.path("city").asText("").trim();
+//                if (!name.isEmpty() && stores.size() < NEARBY_STORE_LIMIT) stores.add(new String[]{name, city});
+//            }
+//            log.info("stage=STORE_API_OK count={}", stores.size());
+//            return stores;
+//        } catch (InterruptedException e) {
+//            Thread.currentThread().interrupt();
+//            log.error("stage=STORE_API_FAILED — interrupted");
+//            return List.of();
+//        } catch (Exception e) {
+//            log.error("stage=STORE_API_FAILED", e);
+//            return List.of();
+//        }
+//    }
+
+
+
     private List<String[]> findNearbyStores(double lat, double lng) {
-        if (storeApiKey == null || storeApiKey.isBlank()) {
-            log.error("stage=STORE_API_NOT_CONFIGURED — set karvachauth.store-api.key");
-            return List.of();
-        }
         try {
-            String url = storeApiUrl + "?lat=" + lat + "&lng=" + lng + "&limit=" + NEARBY_STORE_LIMIT;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(8))
-                    .header("X-Api-Key", storeApiKey)
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-            HttpResponse<String> response = STORE_HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                log.warn("stage=STORE_API_FAILED httpStatus={}", response.statusCode());
-                return List.of();
-            }
-            JsonNode root = STORE_JSON.readTree(response.body());
-            if (!root.path("success").asBoolean(false)) {
-                log.warn("stage=STORE_API_FAILED success=false");
-                return List.of();
-            }
             List<String[]> stores = new ArrayList<>();
-            for (JsonNode store : root.path("stores")) {
-                String name = store.path("shortName").asText("").trim();
-                String city = store.path("city").asText("").trim();
-                if (!name.isEmpty() && stores.size() < NEARBY_STORE_LIMIT) stores.add(new String[]{name, city});
+            for (MiaStore s : nearbyStoreService.nearest(lat, lng, NEARBY_STORE_LIMIT)) {
+                String name = s.getShortName() == null ? "" : s.getShortName().trim();
+                String city = s.getCity() == null ? "" : s.getCity().trim();
+                if (!name.isEmpty()) stores.add(new String[]{name, city});
             }
-            log.info("stage=STORE_API_OK count={}", stores.size());
+            log.info("stage=STORE_LOOKUP_OK count={} source=KC_DB", stores.size());
             return stores;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("stage=STORE_API_FAILED — interrupted");
-            return List.of();
         } catch (Exception e) {
-            log.error("stage=STORE_API_FAILED", e);
+            log.error("stage=STORE_LOOKUP_FAILED", e);
             return List.of();
         }
     }
-
     /**
      * C2 (Flow) — sends the "Book Appointment" WhatsApp Flow with the stores to choose from.
      * minDate = today, so past dates can't be picked. flow_token = "BOOK_<sessionId>".
