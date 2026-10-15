@@ -451,7 +451,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "                      'W_BUDGET', 'H_BUDGET', 'S_BUDGET', " +
                     "                      'W_BROWSE_PRODUCTS', 'W_ADD_MORE', 'H_BROWSE_PRODUCTS', 'S_BROWSE_PRODUCTS', 'S_ADD_MORE', " +
                     "                      'W_ADDED_TO_LIST', 'S_ADDED_TO_LIST', 'H_CONFIRM_CHOICE', " +
-                    "                      'W_HINT_READY', 'W_STORE_INVITE', 'BOOK_STORE_VISIT', " +
+                    "                      'W_HINT_READY', 'W_STORE_INVITE', 'BOOK_STORE_VISIT', 'STORE_PICK', 'STORE_DATETIME', 'STORE_BOOKED', " +
                     "                      'W_REINFORCE', 'W_REINFORCE_NUDGE', 'S_REINFORCE', 'H_CAP_DETAILS', " +
                     "                      'W_CAPH_NAME', 'W_CAPH_ANNIVERSARY', 'W_CAPH_MOBILE', " +
                     "                      'H_CAPW_NAME', 'H_CAPW_BIRTHDAY', 'H_CAPW_MOBILE', " +
@@ -512,25 +512,25 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                             @Param("searchPhone") String searchPhone);
 
     // ==================================================================
-    // STORE VISITS PAGE — bookings from the C2 WhatsApp Flow (event window on bookings.created_at)
+    // STORE VISITS PAGE — bookings from C2 (event window on bookings.confirmed_at)
     //
-    // A booking row is written when she submits the booking form. Cancelled bookings are left out
-    // of every number and of the table.
+    // A booking row is written as PENDING when she picks a store from the list, and becomes CONFIRMED
+    // when she sends a valid date & time. Only CONFIRMED / VISITED rows count as bookings.
     // ==================================================================
 
     /** Bookings made in the window (not cancelled). */
     @Query(nativeQuery = true, value =
             "SELECT COUNT(*) FROM bookings b " +
-                    "WHERE b.status <> 'CANCELLED' " +
+                    "WHERE b.status IN ('CONFIRMED', 'VISITED') " +
                     "  AND (:path IS NULL OR b.path = :path) " +
-                    "  AND b.created_at >= :from AND b.created_at < :to")
+                    "  AND b.confirmed_at >= :from AND b.confirmed_at < :to")
     long countBookings(@Param("path") String path,
                        @Param("from") LocalDateTime from,
                        @Param("to") LocalDateTime to);
 
     /**
      * Sessions that got to C2 in the window — she tapped "Visit nearby store" / "Visit Store",
-     * which puts the session on BOOK_STORE_VISIT, where the booking form is sent.
+     * which puts the session on BOOK_STORE_VISIT, where her location is asked.
      */
     @Query(nativeQuery = true, value =
             "SELECT COUNT(DISTINCT m.session_id) FROM messages m " +
@@ -541,17 +541,36 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                                         @Param("from") LocalDateTime from,
                                         @Param("to") LocalDateTime to);
 
+    /** Sessions that shared their location (C2) in the window. */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT m.session_id) FROM messages m " +
+                    "WHERE m.direction = 'INBOUND' AND m.message_type = 'location' " +
+                    "  AND (:path IS NULL OR m.path = :path) " +
+                    "  AND m.created_at >= :from AND m.created_at < :to")
+    long countSessionsSharedLocation(@Param("path") String path,
+                                     @Param("from") LocalDateTime from,
+                                     @Param("to") LocalDateTime to);
+
+    /** Sessions that picked a store from the list (a PENDING or CONFIRMED booking row) in the window. */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT b.session_id) FROM bookings b " +
+                    "WHERE (:path IS NULL OR b.path = :path) " +
+                    "  AND b.created_at >= :from AND b.created_at < :to")
+    long countSessionsPickedStore(@Param("path") String path,
+                                  @Param("from") LocalDateTime from,
+                                  @Param("to") LocalDateTime to);
+
     interface SlotCountProjection {
         String getTimeSlot();
         Long getTotal();
     }
 
-    /** The time slot picked most often (ties → the earlier one alphabetically). */
+    /** The visit time picked most often ("18:30"; ties → the earlier time). */
     @Query(nativeQuery = true, value =
             "SELECT b.time_slot AS timeSlot, COUNT(*) AS total FROM bookings b " +
-                    "WHERE b.status <> 'CANCELLED' AND b.time_slot IS NOT NULL " +
+                    "WHERE b.status IN ('CONFIRMED', 'VISITED') AND b.time_slot IS NOT NULL " +
                     "  AND (:path IS NULL OR b.path = :path) " +
-                    "  AND b.created_at >= :from AND b.created_at < :to " +
+                    "  AND b.confirmed_at >= :from AND b.confirmed_at < :to " +
                     "GROUP BY b.time_slot " +
                     "ORDER BY total DESC, b.time_slot " +
                     "LIMIT 1")
@@ -566,6 +585,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
         String getPhone();
         String getPath();
         String getStoreName();
+        String getCity();
         LocalDate getVisitDate();
         String getTimeSlot();
         String getReservedSkus();        // comma-separated
@@ -577,16 +597,16 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     /** One page of bookings, newest first. */
     @Query(nativeQuery = true, value =
             "SELECT b.id AS bookingId, b.booking_ref AS bookingRef, c.name AS customerName, b.phone AS phone, " +
-                    "       b.path AS path, b.store_name AS storeName, b.visit_date AS visitDate, " +
+                    "       b.path AS path, b.store_name AS storeName, b.city AS city, b.visit_date AS visitDate, " +
                     "       b.time_slot AS timeSlot, b.reserved_skus AS reservedSkus, " +
-                    "       p.name AS reservedProductName, b.status AS status, b.created_at AS bookedAt " +
+                    "       p.name AS reservedProductName, b.status AS status, COALESCE(b.confirmed_at, b.created_at) AS bookedAt " +
                     "FROM bookings b " +
                     "LEFT JOIN customers c ON c.id = b.customer_id " +
                     "LEFT JOIN products p ON p.sku = b.reserved_skus " +     // matches only a single SKU
-                    "WHERE b.status <> 'CANCELLED' " +
+                    "WHERE b.status IN ('CONFIRMED', 'VISITED') " +
                     "  AND (:path IS NULL OR b.path = :path) " +
-                    "  AND b.created_at >= :from AND b.created_at < :to " +
-                    "ORDER BY b.created_at DESC, b.id DESC " +
+                    "  AND b.confirmed_at >= :from AND b.confirmed_at < :to " +
+                    "ORDER BY b.confirmed_at DESC, b.id DESC " +
                     "LIMIT :limit OFFSET :offset")
     List<BookingRowProjection> findBookingsPage(@Param("path") String path,
                                                 @Param("from") LocalDateTime from,
@@ -707,7 +727,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "              AND NOT EXISTS (SELECT 1 FROM messages tap WHERE tap.session_id = s.id AND tap.direction = 'INBOUND' " +
                     "                              AND tap.button_payload = 'W_MAYBE_LATER') " +
                     "              AND NOT " + STORE_TAP_ON_SESSION +
-                    "              AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.session_id = s.id AND b.status <> 'CANCELLED') " +
+                    "              AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.session_id = s.id AND b.status IN ('CONFIRMED', 'VISITED')) " +
                     "           THEN 'HINT_SENT_NO_VISIT' " +
                     "         WHEN s.path = 'WIFE' " +
                     "              AND EXISTS (SELECT 1 FROM wishlist_items w WHERE w.session_id = s.id) " +
@@ -722,7 +742,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "         WHEN s.path = 'SPARKLE' " +
                     "              AND EXISTS (SELECT 1 FROM wishlist_items w WHERE w.session_id = s.id) " +
                     "              AND NOT " + STORE_TAP_ON_SESSION +
-                    "              AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.session_id = s.id AND b.status <> 'CANCELLED') " +
+                    "              AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.session_id = s.id AND b.status IN ('CONFIRMED', 'VISITED')) " +
                     "           THEN 'SHORTLISTED_NO_VISIT' " +
                     "         ELSE 'OTHER' " +
                     "       END AS segment " +
@@ -785,7 +805,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "  WHERE s.current_step = 'CLOSED' AND s.closed_at >= :from AND s.closed_at < :to " +
                     "  UNION ALL " +
                     "  SELECT b.phone FROM bookings b " +
-                    "  WHERE b.status <> 'CANCELLED' AND b.created_at >= :from AND b.created_at < :to " +
+                    "  WHERE b.status IN ('CONFIRMED', 'VISITED') AND b.confirmed_at >= :from AND b.confirmed_at < :to " +
                     "  UNION ALL " +
                     "  SELECT l.phone FROM leads l " +
                     "  WHERE ((l.lead_type IN ('HUSBAND_CAPTURED', 'WIFE_CAPTURED') AND l.consent = 'YES') " +
@@ -798,7 +818,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     /** Customers with a confirmed (not cancelled) store visit booked in the window — any path. */
     @Query(nativeQuery = true, value =
             "SELECT COUNT(DISTINCT b.phone) FROM bookings b " +
-                    "WHERE b.status <> 'CANCELLED' AND b.created_at >= :from AND b.created_at < :to")
+                    "WHERE b.status IN ('CONFIRMED', 'VISITED') AND b.confirmed_at >= :from AND b.confirmed_at < :to")
     long countCustomersWithBooking(@Param("from") LocalDateTime from,
                                    @Param("to") LocalDateTime to);
 

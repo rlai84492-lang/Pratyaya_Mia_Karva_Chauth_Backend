@@ -1262,6 +1262,8 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
             log.info("stage=TEXT eventId={} handled={}", eventId, handled);
         } else if (location != null) {
             printLocation(eventId, phone, location, msg);
+            boolean handled = botEngineService.onLocationShared(phone, text(location, "latitude"), text(location, "longitude"));
+            log.info("stage=LOCATION eventId={} handled={}", eventId, handled);
         } else {
             log.info("stage=IGNORED eventId={} messageType={}", eventId, type);
         }

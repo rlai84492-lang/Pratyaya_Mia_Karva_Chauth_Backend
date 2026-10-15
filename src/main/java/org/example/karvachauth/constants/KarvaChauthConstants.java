@@ -102,4 +102,10 @@ public final class KarvaChauthConstants {
     public static final String PICK_HINT_SENT = "HINT_SENT";   // piece included in an Ishara
     public static final String PICK_SELECTED  = "SELECTED";    // 2B Buy this for her
     public static final String PICK_RESERVED  = "RESERVED";    // C2 booking (later)
+
+    public static final String STEP_STORE_PICK     = "STORE_PICK";
+    public static final String STEP_STORE_DATETIME = "STORE_DATETIME";
+    public static final String STEP_STORE_BOOKED   = "STORE_BOOKED";
+    public static final String BOOKING_PENDING     = "PENDING";
+    public static final String BOOKING_CONFIRMED   = "CONFIRMED";
 }

@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -413,7 +414,7 @@ public class DashboardServiceImple implements DashboardService {
     private String visitText(DashboardRepository.ActivityRowProjection row) {
         List<String> parts = new ArrayList<>();
         if (hasText(row.getStoreName())) parts.add(row.getStoreName());
-        String when = (visitDayText(row.getVisitDate()) + " " + (row.getTimeSlot() == null ? "" : row.getTimeSlot())).trim();
+        String when = (visitDayText(row.getVisitDate()) + " " + timeLabel(row.getTimeSlot())).trim();
         if (!when.isEmpty()) parts.add(when);
         return parts.isEmpty() ? "" : " · " + String.join(", ", parts);
     }
@@ -425,6 +426,17 @@ public class DashboardServiceImple implements DashboardService {
         if (visitDate.equals(today)) return "Today";
         if (visitDate.equals(today.plusDays(1))) return "Tomorrow";
         return visitDate.format(DAY_MONTH);
+    }
+
+    /** "17:30" → "5:30 pm" (bookings keep a 24h time). Anything else is shown as it is. */
+    private String timeLabel(String timeSlot) {
+        if (timeSlot == null) return "";
+        String slot = timeSlot.trim();
+        try {
+            return LocalTime.parse(slot).format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)).toLowerCase(Locale.ENGLISH);
+        } catch (DateTimeParseException e) {
+            return slot;
+        }
     }
 
     /** The Step 0 button she tapped, by the path it started. */
@@ -632,7 +644,8 @@ public class DashboardServiceImple implements DashboardService {
      * (1I is "Reminder Offer" for the Wife, "Keep Me Posted" for Sparkle).
      *
      *   0  · Opener — tapped a Step 0 button, but not yet "Choose my gift" / "Find her a gift" / "Show me".
-     *   C2 · Store Visit — tapped "Visit nearby store" (the booking form is sent here once it's built).
+     *   C2 · Store Visit / Store List / Date & Time / Visit Booked — the store booking steps
+     *        (location asked → 3 nearest stores → date & time asked → booked).
      *   E1 · Closed — finished journeys (current step CLOSED). A finished row still shows the
      *                 step it ended on (e.g. 1K · Consent), with status "Completed".
      *
@@ -674,6 +687,9 @@ public class DashboardServiceImple implements DashboardService {
             new ScriptStep("1I", "Keep Me Posted", List.of(STEP_S_REINFORCE)),
             // Shared
             new ScriptStep("C2", "Store Visit", List.of(STEP_BOOK_STORE_VISIT)),
+            new ScriptStep("C2", "Store List", List.of(STEP_STORE_PICK)),
+            new ScriptStep("C2", "Date & Time", List.of(STEP_STORE_DATETIME)),
+            new ScriptStep("C2", "Visit Booked", List.of(STEP_STORE_BOOKED)),
             new ScriptStep("E1", "Closed", List.of(STEP_CLOSED)));
 
     /** Bot step value → its script step, for the table's Step column. */
@@ -1050,8 +1066,8 @@ public class DashboardServiceImple implements DashboardService {
 
     // ==================================================================
     // STORE VISITS PAGE
-    // Bookings come from the C2 WhatsApp Flow (bookings table), counted by when they were made.
-    // Cancelled bookings are left out everywhere.
+    // Bookings come from C2 (bookings table), counted by when they were confirmed (date & time given).
+    // Only CONFIRMED / VISITED bookings count; PENDING (store picked, no time yet) and CANCELLED are left out.
     // ==================================================================
 
     private static final int BOOKINGS_PAGE_SIZE = 50;
@@ -1078,7 +1094,7 @@ public class DashboardServiceImple implements DashboardService {
             mostPickedSlot.put("pctOfBookings", 0.0);
         } else {
             long slotBookings = valueOrZero(topSlot.get(0).getTotal());
-            mostPickedSlot.put("timeSlot", topSlot.get(0).getTimeSlot());
+            mostPickedSlot.put("timeSlot", timeLabel(topSlot.get(0).getTimeSlot()));
             mostPickedSlot.put("bookings", slotBookings);
             mostPickedSlot.put("pctOfBookings", pct(slotBookings, visitsBooked));
         }
@@ -1086,6 +1102,8 @@ public class DashboardServiceImple implements DashboardService {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("visitsBooked", visitsBooked);
         data.put("bookingFormOpened", bookingFormOpened);
+        data.put("locationShared", dashboardRepo.countSessionsSharedLocation(pathType, window.from(), window.to()));
+        data.put("storePicked", dashboardRepo.countSessionsPickedStore(pathType, window.from(), window.to()));
         data.put("completedPct", pct(visitsBooked, bookingFormOpened));
         data.put("mostPickedSlot", mostPickedSlot);
         data.put("flow", normaliseFlow(flow));
@@ -1133,6 +1151,7 @@ public class DashboardServiceImple implements DashboardService {
         booking.put("flow", pathToFlow(row.getPath()));
         booking.put("pathLabel", pathLabel(row.getPath()));
         booking.put("storeName", row.getStoreName());
+        booking.put("city", row.getCity());
         booking.put("visitDate", row.getVisitDate());
         booking.put("timeSlot", row.getTimeSlot());
         booking.put("slotLabel", slotLabel(row.getVisitDate(), row.getTimeSlot()));
@@ -1156,7 +1175,7 @@ public class DashboardServiceImple implements DashboardService {
             else if (daysAhead > 1 && daysAhead < 7) day = visitDate.format(WEEKDAY);
             else day = visitDate.format(DAY_MONTH);
         }
-        String slot = timeSlot == null ? "" : timeSlot.trim();
+        String slot = timeLabel(timeSlot);
         if (day.isEmpty()) return slot;
         return slot.isEmpty() ? day : day + ", " + slot;
     }
@@ -1456,7 +1475,7 @@ public class DashboardServiceImple implements DashboardService {
 
         // Completed or opted in
         List<Map<String, Object>> completed = new ArrayList<>();
-        completed.add(audienceCard(COMPLETED_SEGMENTS.get(0), dashboardRepo.countCustomersWithBooking(from, to)));
+        completed.add(audienceCard(COMPLETED_SEGMENTS.get(0), dashboardRepo.countBookings(null, from, to)));
         completed.add(audienceCard(COMPLETED_SEGMENTS.get(1),
                 dashboardRepo.countCustomersWithLead(List.of(LEAD_BUY_ONLINE_CLICKED), false, from, to)));
         completed.add(audienceCard(COMPLETED_SEGMENTS.get(2),
@@ -1543,7 +1562,7 @@ public class DashboardServiceImple implements DashboardService {
                     .sum();
         }
         return switch (segment.key()) {
-            case "store-visit-booked" -> dashboardRepo.countCustomersWithBooking(from, to);
+            case "store-visit-booked" -> dashboardRepo.countBookings(null, from, to);
             case "clicked-buy-online" -> dashboardRepo.countCustomersWithLead(List.of(LEAD_BUY_ONLINE_CLICKED), false, from, to);
             case "referred-consent-given" -> dashboardRepo.countCustomersWithLead(ALL_REFERRAL_TYPES, true, from, to);
             default -> dashboardRepo.countCustomersWithLead(List.of(LEAD_SPARKLE_OPT_IN), false, from, to);

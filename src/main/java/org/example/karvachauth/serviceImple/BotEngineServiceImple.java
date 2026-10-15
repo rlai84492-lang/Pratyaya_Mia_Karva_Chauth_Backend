@@ -1,8 +1,11 @@
 package org.example.karvachauth.serviceImple;
 
-//import jakarta.transaction.Transactional;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.karvachauth.entity.Booking;
 import org.example.karvachauth.entity.Customer;
 import org.example.karvachauth.entity.Lead;
 import org.example.karvachauth.entity.Message;
@@ -10,6 +13,7 @@ import org.example.karvachauth.entity.Product;
 import org.example.karvachauth.entity.ProductPick;
 import org.example.karvachauth.entity.Session;
 import org.example.karvachauth.entity.WishlistItem;
+import org.example.karvachauth.repository.BookingRepository;
 import org.example.karvachauth.repository.CustomerRepository;
 import org.example.karvachauth.repository.LeadRepository;
 import org.example.karvachauth.repository.MessageRepository;
@@ -27,9 +31,17 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -66,7 +78,44 @@ public class BotEngineServiceImple implements BotEngineService {
     private final LeadRepository leadRepository;                 // conversions → dashboard funnel
     private final ProductPickRepository productPickRepository;   // product interactions → "top products"
     private final ProductRepository productRepository;           // the catalogue — carousels, wishlist, Ishara, Buy Online
+    private final BookingRepository bookingRepository;           // C2 store visits — PENDING (store picked) → CONFIRMED
     private final TaskScheduler taskScheduler;   // needs @EnableScheduling on the application class
+
+    // ---------- C2 — nearby store API ----------
+    @Value("${karvachauth.store-api.url:https://tw-dashboard.centralindia.cloudapp.azure.com/api/dhanteras/store-names/nearby}")
+    private String storeApiUrl;
+
+    @Value("${karvachauth.store-api.key:}")
+    private String storeApiKey;
+
+    private static final int NEARBY_STORE_LIMIT = 3;
+    private static final HttpClient STORE_HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private static final ObjectMapper STORE_JSON = new ObjectMapper();
+
+    // ---------- C2 — visit date / time rules (confirm store hours with the Mia team) ----------
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    private static final LocalTime STORE_OPENS = LocalTime.of(11, 0);
+    private static final LocalTime LAST_VISIT = LocalTime.of(20, 30);
+    private static final int VISIT_MAX_DAYS_AHEAD = 30;
+    private static final long AFTER_BOOKING_DELAY_SECONDS = 5;
+    private static final SecureRandom BOOKING_RANDOM = new SecureRandom();
+    private static final DateTimeFormatter VISIT_DATE_TEXT = DateTimeFormatter.ofPattern("EEE, d MMM uuuu", Locale.ENGLISH);
+    private static final DateTimeFormatter VISIT_TIME_TEXT = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
+    private static final DateTimeFormatter VISIT_EXAMPLE = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
+
+    /**
+     * Visit date & time — no slash needed, am / pm in any case:
+     * "16 10 5 pm", "16 oct 5:30pm", "16 October 2026 5:30 PM", "Oct 16 6.30 pm", "16/10/2026 17:30", "tomorrow 5pm".
+     * VISIT_TIME takes the time off the end; the rest must match one of the date shapes below.
+     */
+    private static final java.util.regex.Pattern VISIT_TIME = java.util.regex.Pattern.compile(
+            "^(.*?)[\\s,]*(?:\\bat\\s*)?(?<!\\d)(\\d{1,2})(?:\\s*[:.]\\s*(\\d{2}))?\\s*(am|pm|a\\.m\\.?|p\\.m\\.?)?$");
+    private static final java.util.regex.Pattern VISIT_DATE_NUMBERS = java.util.regex.Pattern.compile(
+            "^(\\d{1,2})(?:st|nd|rd|th)?[\\s/.-]+(\\d{1,2})(?:[\\s/.-]+(\\d{4}|(?<=[/.-])\\d{2}))?$");
+    private static final java.util.regex.Pattern VISIT_DATE_DAY_MONTH = java.util.regex.Pattern.compile(
+            "^(\\d{1,2})(?:st|nd|rd|th)?[\\s/.-]*(?:of\\s+)?([a-z]{3,9})\\.?(?:[\\s/.-]+(\\d{4}))?$");
+    private static final java.util.regex.Pattern VISIT_DATE_MONTH_DAY = java.util.regex.Pattern.compile(
+            "^([a-z]{3,9})\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?$");
 
     /**
      * The last message recordOutbound() saved on this thread, for moveTo() to put on the new step.
@@ -88,7 +137,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
-    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 20;
+    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 25;
 
     /** Max pieces listed in the Ishara (1G) — keeps the message under WhatsApp's 1024-char body limit. */
     private static final int MAX_HINT_ITEMS = 5;
@@ -96,7 +145,7 @@ public class BotEngineServiceImple implements BotEngineService {
     /**
      * Seconds between the Ishara (1G) and "Want to see them in person?" (1H).
      * WhatsApp doesn't tell us when she taps a URL button, so 1H is sent after a pause instead.
-    **/
+     **/
     private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
@@ -111,7 +160,7 @@ public class BotEngineServiceImple implements BotEngineService {
 
     private static final String[][] CATEGORIES = {
             {"PEND", "Pendants",            "Dainty to dazzling – a piece for everyday wear",  IMG + "Pendants.png"},
-            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      IMG + "mangalshutra.png"},
+            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      "https://titanwatchimages123.blob.core.windows.net/watch-images/mia-sutra-kc.png"},
             {"PNCH", "Pendant & Chain",     "Ready-to-wear sets, chain included",              IMG + "Pendant%20&%20Chain.png"},
             {"NECK", "Necklaces",           "For the days that call for a little extra shine", IMG + "Necklaces.png"},
             {"EARR", "Earrings",            "Studs & drops that do all the talking",           IMG + "Earrings.png"},
@@ -891,8 +940,12 @@ public class BotEngineServiceImple implements BotEngineService {
         // Shared buttons — same behaviour on every path
         if (isStoreVisitTap(p)) {
             // C2 — session is now on BOOK_STORE_VISIT (stepForTap). Ask her to share her location;
-            // for a product card, p.substring(6) is the SKU she tapped.
+            // for a product card, p.substring(6) is the SKU she tapped — reserved with the booking.
+            if (p.startsWith("VISIT_")) session.setSelectedProductSku(p.substring(6));
             handled = askForLocation(session);
+        } else if (p.startsWith("STORE_")) {
+            // C2 — she picked one of the nearby stores from the list → ask for date & time
+            handled = onStorePicked(session, p.substring(6));
         } else if ("TEST_C2_BOOKED".equals(p)) {
             // TEST ONLY — pretends the C2 booking just completed, so 1I can be tested before C2 exists.
             // No real button ever sends this. Delete this branch once C2 is built.
@@ -1003,8 +1056,8 @@ public class BotEngineServiceImple implements BotEngineService {
 
     /**
      * C2 — "Visit nearby store" / "Visit Store" tapped: asks her to share her current location.
-     * The message is saved on BOOK_STORE_VISIT. Her location comes back as a "location" message,
-     * which the webhook prints (not saved yet). Showing the 3 nearest Mia stores comes later.
+     * The message is saved on BOOK_STORE_VISIT. Her location comes back as a "location" message
+     * → onLocationShared() → the 3 nearest Mia stores.
      */
     private boolean askForLocation(Session session) {
         String text = "Let's find a Mia store near you 📍 "
@@ -1019,6 +1072,330 @@ public class BotEngineServiceImple implements BotEngineService {
     /** "Visit nearby store" / "📍 Visit Store" (BTN_STORE_FINDER) or "Visit Store" on a product card (VISIT_<sku>). */
     private static boolean isStoreVisitTap(String p) {
         return "BTN_STORE_FINDER".equals(p) || p.startsWith("VISIT_");
+    }
+
+    // ==================================================================
+    // C2 — BOOK A STORE VISIT
+    //
+    //   "Visit Store" tap        → location request                     BOOK_STORE_VISIT
+    //   she shares her location  → 3 nearest stores (list message)      STORE_PICK
+    //   she picks a store        → bookings row PENDING, ask date/time  STORE_DATETIME
+    //   valid date & time        → bookings row CONFIRMED, lead,
+    //                              "Your visit is booked"               STORE_BOOKED
+    //   5 seconds later          → 1I (Wife / Sparkle) or 2E (Husband)  (afterStoreVisitBooked)
+    // ==================================================================
+
+    /** C2 — she shared her location (webhook "location" message). Saves it and sends the 3 nearest stores. */
+    @Override
+    public boolean onLocationShared(String phone, String latitude, String longitude) {
+        lastOutbound.remove();
+        String to = normalizePhone(phone);
+        Double lat = parseCoordinate(latitude, 90);
+        Double lng = parseCoordinate(longitude, 180);
+        if (to == null || lat == null || lng == null) {
+            log.warn("stage=LOCATION_INVALID — missing phone or bad latitude/longitude");
+            return false;
+        }
+        Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
+        if (found.isEmpty() || found.get().getPath() == null) {
+            log.warn("stage=LOCATION_NO_SESSION — no active journey for this location");
+            return false;
+        }
+        Session session = found.get();
+
+        try {
+            messageRepository.save(Message.builder()
+                    .customerId(session.getCustomerId())
+                    .sessionId(session.getId())
+                    .phone(session.getPhone())
+                    .direction(DIR_INBOUND)
+                    .status(MSG_STATUS_READ)
+                    .step(session.getCurrentStep())
+                    .path(session.getPath())
+                    .messageType("location")
+                    .contentText(lat + "," + lng)
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed to record location sessionId={}", session.getId(), e);
+        }
+        session.setLastInboundAt(LocalDateTime.now());
+        session.setIdleNudgeSent(false);
+        log.info("stage=LOCATION_IN sessionId={} path={} step={}", session.getId(), session.getPath(), session.getCurrentStep());
+
+        boolean handled = sendNearbyStores(session, lat, lng);
+        sessionRepository.save(session);
+        return handled;
+    }
+
+    /** The 3 nearest stores as a list message (one row per store). No store / API down → "Try again" / "Keep browsing". */
+    private boolean sendNearbyStores(Session session, double lat, double lng) {
+        List<String[]> stores = findNearbyStores(lat, lng);
+
+        if (stores.isEmpty()) {
+            String text = "Sorry, I couldn't find a Mia store near that location right now 😔\n"
+                    + "You can share another location, or keep browsing.";
+            String mid = karixService.sendButtonMessage(session.getPhone(), text,
+                    List.of(
+                            new String[]{"BTN_STORE_FINDER", "📍 Try again"},
+                            new String[]{"ANOTHER_CATEGORY", "🛍 Keep browsing"}));
+            recordOutbound(session, "interactive", text, mid);
+            moveTo(session, STEP_BOOK_STORE_VISIT);
+            log.warn("stage=NO_NEARBY_STORES sessionId={}", session.getId());
+            return mid != null;
+        }
+
+        List<String[]> rows = new ArrayList<>();
+        for (String[] store : stores) {
+            String name = store[0];
+            String city = store[1];
+            String place = name.replaceFirst("(?i)^mia\\s+by\\s+tanishq\\s*,\\s*", "");
+            int comma = place.indexOf(',');
+            String rowTitle = comma > 0 ? place.substring(0, comma).trim() : place;
+            String rowDescription = comma > 0 ? place.substring(comma + 1).trim() : city;
+            String rowId = "STORE_" + city + "|" + name;
+            rows.add(new String[]{
+                    rowId.length() <= 200 ? rowId : rowId.substring(0, 200),
+                    fit(rowTitle, 24),
+                    fit(rowDescription, 72)});
+        }
+
+        String text = "Here are the Mia stores closest to you 📍\n"
+                + "Pick one, and I'll book your visit.";
+        String mid = karixService.sendListMessage(session.getPhone(), text, "Choose a store", rows);
+        recordOutbound(session, "interactive", text + "\n\n"
+                + stores.stream().map(s -> "• " + s[0]).collect(Collectors.joining("\n")), mid);
+        moveTo(session, STEP_STORE_PICK);
+        log.info("stage=NEARBY_STORES_SENT sessionId={} stores={} sent={}", session.getId(), stores.size(), mid != null);
+        return mid != null;
+    }
+
+    /**
+     * Calls the nearby-store API: GET {url}?lat=..&lng=..&limit=3 with header X-Api-Key.
+     * Returns {shortName, city} per store, nearest first. Empty list if the API fails — never throws.
+     */
+    private List<String[]> findNearbyStores(double lat, double lng) {
+        if (storeApiKey == null || storeApiKey.isBlank()) {
+            log.error("stage=STORE_API_NOT_CONFIGURED — set karvachauth.store-api.key");
+            return List.of();
+        }
+        try {
+            String url = storeApiUrl + "?lat=" + lat + "&lng=" + lng + "&limit=" + NEARBY_STORE_LIMIT;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("X-Api-Key", storeApiKey)
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = STORE_HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                log.warn("stage=STORE_API_FAILED httpStatus={}", response.statusCode());
+                return List.of();
+            }
+            JsonNode root = STORE_JSON.readTree(response.body());
+            if (!root.path("success").asBoolean(false)) {
+                log.warn("stage=STORE_API_FAILED success=false");
+                return List.of();
+            }
+            List<String[]> stores = new ArrayList<>();
+            for (JsonNode store : root.path("stores")) {
+                String name = store.path("shortName").asText("").trim();
+                String city = store.path("city").asText("").trim();
+                if (!name.isEmpty() && stores.size() < NEARBY_STORE_LIMIT) stores.add(new String[]{name, city});
+            }
+            log.info("stage=STORE_API_OK count={}", stores.size());
+            return stores;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("stage=STORE_API_FAILED — interrupted");
+            return List.of();
+        } catch (Exception e) {
+            log.error("stage=STORE_API_FAILED", e);
+            return List.of();
+        }
+    }
+
+    /**
+     * C2 — she tapped a store in the list (row id "STORE_<city>|<shortName>").
+     * Saves / updates this session's PENDING booking with the store and asks for the date & time.
+     */
+    private boolean onStorePicked(Session session, String value) {
+        int bar = value.indexOf('|');
+        String city = bar > 0 ? value.substring(0, bar).trim() : null;
+        String storeName = (bar >= 0 ? value.substring(bar + 1) : value).trim();
+        if (storeName.isEmpty()) {
+            log.warn("stage=STORE_PICK_INVALID sessionId={}", session.getId());
+            return askForLocation(session);
+        }
+
+        Booking booking = bookingRepository
+                .findFirstBySessionIdAndStatusOrderByIdDesc(session.getId(), BOOKING_PENDING)
+                .orElseGet(() -> Booking.builder()
+                        .bookingRef(newBookingRef())
+                        .customerId(session.getCustomerId())
+                        .sessionId(session.getId())
+                        .phone(session.getPhone())
+                        .path(session.getPath())
+                        .status(BOOKING_PENDING)
+                        .build());
+        booking.setStoreName(fit(storeName, 200));
+        booking.setCity(city == null || city.isEmpty() ? null : fit(city, 50));
+        booking.setReservedSkus(reservedSkus(session));
+        bookingRepository.save(booking);
+        session.setStoreName(fit(storeName, 200));
+        log.info("stage=STORE_PICKED sessionId={} bookingRef={} city={}", session.getId(), booking.getBookingRef(), city);
+
+        String example = LocalDate.now(IST).plusDays(1).format(VISIT_EXAMPLE);
+        String question = "Lovely choice! 💛 When would you like to visit *" + storeName + "*?\n\n"
+                + "Please send the date and time, like this: *" + example + " 5:30 pm*\n"
+                + "(Stores are open " + STORE_OPENS.format(VISIT_TIME_TEXT) + " – " + LAST_VISIT.format(VISIT_TIME_TEXT) + ")";
+        boolean sent = askQuestion(session, question);
+        moveTo(session, STEP_STORE_DATETIME);
+        return sent;
+    }
+
+    /** C2 — her typed date & time. Invalid → explain and ask again. Valid → booking CONFIRMED + confirmation. */
+    private boolean onVisitDateTime(Session session, String answer) {
+        Optional<Booking> pending = bookingRepository
+                .findFirstBySessionIdAndStatusOrderByIdDesc(session.getId(), BOOKING_PENDING);
+        if (pending.isEmpty()) {
+            log.warn("stage=VISIT_NO_PENDING_BOOKING sessionId={} — asking for location again", session.getId());
+            session.setCurrentStep(STEP_BOOK_STORE_VISIT);
+            return askForLocation(session);
+        }
+
+        String example = LocalDate.now(IST).plusDays(1).format(VISIT_EXAMPLE) + " 5:30 pm";
+        LocalDateTime visit = parseVisitDateTime(answer);
+        if (visit == null) {
+            return reask(session, "Hmm, I couldn't read that. Please send the date and time like this: *" + example + "*");
+        }
+        LocalDateTime now = LocalDateTime.now(IST);
+        if (!visit.isAfter(now.plusMinutes(30))) {
+            return reask(session, "That time has already passed or is too soon ⏰ Please pick a later date and time, e.g. *" + example + "*");
+        }
+        if (visit.toLocalDate().isAfter(now.toLocalDate().plusDays(VISIT_MAX_DAYS_AHEAD))) {
+            return reask(session, "Please pick a date within the next " + VISIT_MAX_DAYS_AHEAD + " days, e.g. *" + example + "*");
+        }
+        LocalTime time = visit.toLocalTime();
+        if (time.isBefore(STORE_OPENS) || time.isAfter(LAST_VISIT)) {
+            return reask(session, "Stores are open " + STORE_OPENS.format(VISIT_TIME_TEXT) + " – "
+                    + LAST_VISIT.format(VISIT_TIME_TEXT) + ". Please pick a time in between, e.g. *" + example + "*");
+        }
+
+        Booking booking = pending.get();
+        booking.setVisitDate(visit.toLocalDate());
+        booking.setTimeSlot(time.format(DateTimeFormatter.ofPattern("HH:mm")));
+        booking.setStatus(BOOKING_CONFIRMED);
+        booking.setConfirmedAt(LocalDateTime.now());
+        bookingRepository.save(booking);
+
+        recordLead(session, LEAD_STORE_VISIT_BOOKED, Lead.builder()
+                .bookingRef(booking.getBookingRef())
+                .storeName(booking.getStoreName())
+                .productSkus(booking.getReservedSkus()));
+        if (booking.getReservedSkus() != null) {
+            List<String> skus = Arrays.asList(booking.getReservedSkus().split(","));
+            for (Product prod : productRepository.findBySkuIn(skus)) {
+                recordPick(session, prod.getSku(), prod.getCategory(), PICK_RESERVED);
+            }
+        }
+
+        String text = "Done. Your visit is booked. 🎉\n\n"
+                + "📍 *" + booking.getStoreName() + "*\n"
+                + "📅 " + visit.toLocalDate().format(VISIT_DATE_TEXT) + "\n"
+                + "⏰ " + time.format(VISIT_TIME_TEXT) + "\n"
+                + "🔖 Booking ID: *" + booking.getBookingRef() + "*\n\n"
+                + (booking.getReservedSkus() != null
+                ? "Just show this message at the store - your picks will be ready for you 💛"
+                : "Just show this message at the store - we can't wait to see you 💛");
+        String mid = karixService.sendTextMessage(session.getPhone(), text);
+        recordOutbound(session, "text", text, mid);
+        moveTo(session, STEP_STORE_BOOKED);
+        log.info("stage=STORE_VISIT_BOOKED sessionId={} bookingRef={} visitDate={} time={} sent={}",
+                session.getId(), booking.getBookingRef(), booking.getVisitDate(), booking.getTimeSlot(), mid != null);
+
+        scheduleFollowUp(session.getId(), STEP_STORE_BOOKED, AFTER_BOOKING_DELAY_SECONDS,
+                "AFTER_BOOKING", this::afterStoreVisitBooked);
+        return mid != null;
+    }
+
+    /** "16 oct 5:30 pm" / "16 10 5pm" / "16/10/2026 17:30" / "tomorrow 5 pm" → 2026-10-16T17:30. Year optional. Null if unreadable. */
+    private static LocalDateTime parseVisitDateTime(String raw) {
+        String text = raw.toLowerCase(Locale.ROOT).replace(',', ' ').replaceAll("\\s+", " ").trim();
+        java.util.regex.Matcher t = VISIT_TIME.matcher(text);
+        if (!t.matches()) return null;
+        try {
+            int hour = Integer.parseInt(t.group(2));
+            int minute = t.group(3) == null ? 0 : Integer.parseInt(t.group(3));
+            if (t.group(4) != null) {
+                if (hour < 1 || hour > 12) return null;
+                hour = (hour % 12) + (t.group(4).startsWith("p") ? 12 : 0);
+            }
+
+            String datePart = t.group(1).trim();
+            LocalDate today = LocalDate.now(IST);
+            if (datePart.matches("today|aaj")) return today.atTime(hour, minute);
+            if (datePart.matches("tomorrow|tomorow|tommorow|tmrw|kal")) return today.plusDays(1).atTime(hour, minute);
+
+            java.util.regex.Matcher d = VISIT_DATE_NUMBERS.matcher(datePart);
+            if (d.matches()) {
+                int year = d.group(3) == null ? today.getYear()
+                        : d.group(3).length() == 2 ? 2000 + Integer.parseInt(d.group(3)) : Integer.parseInt(d.group(3));
+                return LocalDate.of(year, Integer.parseInt(d.group(2)), Integer.parseInt(d.group(1))).atTime(hour, minute);
+            }
+
+            String day;
+            String monthName;
+            String year;
+            if ((d = VISIT_DATE_DAY_MONTH.matcher(datePart)).matches()) {
+                day = d.group(1); monthName = d.group(2); year = d.group(3);
+            } else if ((d = VISIT_DATE_MONTH_DAY.matcher(datePart)).matches()) {
+                monthName = d.group(1); day = d.group(2); year = d.group(3);
+            } else {
+                return null;
+            }
+            int index = "janfebmaraprmayjunjulaugsepoctnovdec".indexOf(monthName.substring(0, 3));
+            if (index < 0 || index % 3 != 0) return null;
+            return LocalDate.of(year == null ? today.getYear() : Integer.parseInt(year), index / 3 + 1, Integer.parseInt(day))
+                    .atTime(hour, minute);
+        } catch (DateTimeException | NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Pieces to keep ready at the store: her list (Wife / Sparkle), else the one piece she tapped / picked. */
+    private String reservedSkus(Session session) {
+        List<String> skus = wishlistItemRepository.findBySessionIdOrderByAddedAtAsc(session.getId())
+                .stream().map(WishlistItem::getSku).distinct().toList();
+        if (skus.isEmpty() && session.getSelectedProductSku() != null) skus = List.of(session.getSelectedProductSku());
+        return skus.isEmpty() ? null : fit(String.join(",", skus), 1000);
+    }
+
+    /** "MIA-7K2QXP" — unique, no look-alike characters (0/O, 1/I). */
+    private String newBookingRef() {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        String ref;
+        do {
+            StringBuilder sb = new StringBuilder("MIA-");
+            for (int i = 0; i < 6; i++) sb.append(chars.charAt(BOOKING_RANDOM.nextInt(chars.length())));
+            ref = sb.toString();
+        } while (bookingRepository.existsByBookingRef(ref));
+        return ref;
+    }
+
+    /** "12.97" → 12.97 if it's a real coordinate (|value| <= limit), else null. */
+    private static Double parseCoordinate(String raw, double limit) {
+        try {
+            double v = Double.parseDouble(raw == null ? "" : raw.trim());
+            return Double.isFinite(v) && Math.abs(v) <= limit ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Cuts text to max characters (WhatsApp list limits: id 200, title 24, description 72). */
+    private static String fit(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 
     // ==================================================================
@@ -1059,7 +1436,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * A typed message (not a button). Only steps that ask a question expect one;
      * anywhere else it's logged and ignored.
      */
-//    @Transactional
+    @Transactional
     @Override
     public boolean onTextMessage(String phone, String text) {
         lastOutbound.remove();
@@ -1111,6 +1488,7 @@ public class BotEngineServiceImple implements BotEngineService {
             case STEP_H_CAPW_NAME        -> onWifeName(session, answer);
             case STEP_H_CAPW_BIRTHDAY    -> onWifeBirthday(session, answer);
             case STEP_H_CAPW_MOBILE      -> onWifeMobile(session, answer);
+            case STEP_STORE_DATETIME     -> onVisitDateTime(session, answer);
             default -> {
                 log.info("stage=TEXT_NOT_EXPECTED sessionId={} step={} — no question pending", session.getId(), step);
                 yield false;
@@ -1320,9 +1698,12 @@ public class BotEngineServiceImple implements BotEngineService {
         // Budget band — set on Sparkle / Husband after the budget buttons; null on the Wife path
         int[] range = priceRange(session.getSelectedBudget());
 
-        // The whole category from the products table — active pieces only, in the Mia team's display order
+        // The whole category from the products table — active pieces only, in the Mia team's display order.
+        // A piece with no price ("Enquire at store") is shown on the Wife path only.
         List<Product> allInCategory = productRepository.findByCategoryAndActiveTrueOrderByDisplayOrderAscPriceAsc(
-                category, Pageable.unpaged());
+                        category, Pageable.unpaged()).stream()
+                .filter(prod -> TEMPLATE_WIFE.equals(session.getPath()) || prod.getPrice() != null)
+                .toList();
 
         // Budget (Sparkle / Husband):
         //   - pieces in her budget → ONLY those pieces (4 in budget → 4 cards; 12 → 9 + "See more" for 3)
@@ -1393,7 +1774,7 @@ public class BotEngineServiceImple implements BotEngineService {
             cards.add(new KarixService.CarouselCard(
                     prod.getImageUrl(),
                     "*" + prod.getName() + "*",
-                    prod.getPrice() == null ? null
+                    prod.getPrice() == null ? "Price: Enquire at store"
                             : "≈ ₹" + formatInr(prod.getPrice()) + "* (tentative)\n\n*Tentative; varies by city & gold rate",
                     buttons));
         }
@@ -2573,7 +2954,7 @@ public class BotEngineServiceImple implements BotEngineService {
                     .step(session.getCurrentStep())
                     .path(session.getPath())
                     .messageType("button")
-                    .buttonPayload(payload)
+                    .buttonPayload(payload == null ? null : payload.substring(0, Math.min(payload.length(), 100)))
                     .buttonTitle(title == null ? null : title.substring(0, Math.min(title.length(), 100)))
                     .build());
         } catch (Exception e) {

@@ -25,6 +25,8 @@ public interface BotEngineService {
      * Saves / refreshes the customer's WhatsApp profile name (Karix sends it on every message).
      * Safe to call on every inbound — does nothing if the name is empty or unchanged.
      */
+
+    boolean onLocationShared(String phone, String latitude, String longitude);
     void updateCustomerName(String phone, String name);
 
     /** Karva Chauth opener: text + [Choose my gift] [Visit nearby store].

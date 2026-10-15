@@ -21,4 +21,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     List<Booking> findByStoreCodeAndVisitDateOrderByTimeSlotAsc(String storeCode, LocalDate visitDate);
 
     long countByCreatedAtBetween(LocalDateTime from, LocalDateTime to);
+
+    Optional<Booking> findFirstBySessionIdAndStatusOrderByIdDesc(Long sessionId, String status);
 }
