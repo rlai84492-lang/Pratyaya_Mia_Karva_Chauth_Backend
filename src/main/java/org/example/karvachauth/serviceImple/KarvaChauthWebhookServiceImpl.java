@@ -460,10 +460,17 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
 //                } else if (nfm.isObject()) {
 //                    log.info("stage=NOT_BUILT eventId={} — WhatsApp Flow reply (C2 store booking)", eventId);
 //                }
-                } else if (nfm.isObject()) {
+//                } else if (nfm.isObject()) {
+//                    payload = "FLOW_REPLY";
+//                    typed = text(nfm, "response_json");
+//                    log.info("stage=NOT_BUILT eventId={} — WhatsApp Flow reply (C2 store booking)", eventId);
+//                }
+                } else if (nfm.isObject()) {                     // C2 — "Book Appointment" Flow submitted
                     payload = "FLOW_REPLY";
-                    typed = text(nfm, "response_json");
-                    log.info("stage=NOT_BUILT eventId={} — WhatsApp Flow reply (C2 store booking)", eventId);
+                    JsonNode responseJson = nfm.path("response_json").isMissingNode()
+                            ? nfm.path("responseJson") : nfm.path("response_json");
+                    typed = responseJson.isTextual() ? responseJson.asText() : responseJson.toString();
+                    log.info("stage=FLOW_REPLY_RECEIVED eventId={}", eventId);
                 }
             }
             case "location" -> location = msg.path("location");
@@ -476,7 +483,11 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
         saveInbound(phone, providerMessageId, t, payload, title, typed, location,
                 epochToTime(text(msg, "timestamp")), toTime(receivedAtEpochMs));
 
-        if (payload != null && !payload.isBlank()) {
+        if ("FLOW_REPLY".equals(payload)) {
+            botEngineService.updateCustomerName(phone, profileName);
+            boolean handled = botEngineService.onFlowReply(phone, typed);
+            log.info("stage=FLOW_REPLY eventId={} handled={}", eventId, handled);
+        } else if (payload != null && !payload.isBlank()) {
             String path = step0Path(payload, t, title);
             if (path != null) {
                 // Step 0 template tap -> journey starts (session + tap on OPENER, first message sent)
