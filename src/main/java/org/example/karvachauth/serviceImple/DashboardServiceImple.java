@@ -84,7 +84,8 @@ public class DashboardServiceImple implements DashboardService {
         long delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
         long read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
         long failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
-        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
+//        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
+        long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("messagesSent", sent);
@@ -95,7 +96,8 @@ public class DashboardServiceImple implements DashboardService {
         data.put("readReceipts", read);
         data.put("openRate", pct(read, delivered));
         data.put("openerTaps", openerTaps);
-        data.put("clickRate", pct(openerTaps, delivered));
+//        data.put("clickRate", pct(openerTaps, delivered));
+        data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
         data.put("flow", normaliseFlow(flow));
         data.put("range", normaliseRange(range));
         return data;

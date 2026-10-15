@@ -45,11 +45,18 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     // A row with no karix_message_id (Karix rejected the send) counts on its own.
     // ==================================================================
 
+//    @Query(nativeQuery = true, value =
+//            "SELECT COUNT(DISTINCT COALESCE(m.karix_message_id, CONCAT('row-', m.id))) FROM messages m " +
+//                    "WHERE m.direction = 'OUTBOUND' " +
+//                    "  AND m.status IN (:statuses) " +
+//                    "  AND (:path IS NULL OR m.path = :path) " +
+//                    "  AND m.created_at >= :from AND m.created_at < :to")
+    /** Approach 2 (same as Rakhi): customers who got the opener message, counted once each. */
     @Query(nativeQuery = true, value =
-            "SELECT COUNT(DISTINCT COALESCE(m.karix_message_id, CONCAT('row-', m.id))) FROM messages m " +
-                    "WHERE m.direction = 'OUTBOUND' " +
-                    "  AND m.status IN (:statuses) " +
-                    "  AND (:path IS NULL OR m.path = :path) " +
+            "SELECT COUNT(DISTINCT m.phone) FROM messages m " +
+                    "LEFT JOIN sessions s ON s.id = m.session_id " +
+                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' AND m.status IN (:statuses) " +
+                    "  AND (:path IS NULL OR COALESCE(m.path, s.path) = :path) " +
                     "  AND m.created_at >= :from AND m.created_at < :to")
     long countOutboundMessagesByStatus(@Param("statuses") List<String> statuses,
                                        @Param("path") String path,
@@ -69,6 +76,16 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     long countOpenerTaps(@Param("path") String path,
                          @Param("from") LocalDateTime from,
                          @Param("to") LocalDateTime to);
+
+    /** Customers (not sessions) who tapped a Step 0 button — same unit as the opener message counts. */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT s.phone) FROM sessions s " +
+                    "WHERE s.path IS NOT NULL " +
+                    "  AND (:path IS NULL OR s.path = :path) " +
+                    "  AND s.started_at >= :from AND s.started_at < :to")
+    long countOpenerTapCustomers(@Param("path") String path,
+                                 @Param("from") LocalDateTime from,
+                                 @Param("to") LocalDateTime to);
 
     interface PathCountProjection {
         String getPath();

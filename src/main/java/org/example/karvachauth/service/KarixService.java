@@ -1,6 +1,7 @@
 package org.example.karvachauth.service;
 
 import java.util.List;
+import java.util.Map;
 
 public interface KarixService {
 
@@ -30,4 +31,14 @@ public interface KarixService {
      * a "location" message (latitude / longitude) comes back on the webhook.
      */
     String sendLocationRequest(String toPhone, String bodyText);
+
+    /**
+     * WhatsApp Flow message (C2 "Book Appointment"). Shows a button (ctaText, max 20 characters) that opens
+     * the Flow on `screen` with `data` (storeList + minDate). When she submits it, an interactive
+     * "nfm_reply" comes back on the webhook with her answers in response_json.
+     *
+     * @return Karix mid, or null if the send failed
+     */
+    String sendFlowMessage(String toPhone, String bodyText, String flowId, String flowToken,
+                           String ctaText, String screen, Map<String, Object> data);
 }
