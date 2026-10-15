@@ -1393,7 +1393,8 @@ public class BotEngineServiceImple implements BotEngineService {
             cards.add(new KarixService.CarouselCard(
                     prod.getImageUrl(),
                     "*" + prod.getName() + "*",
-                    prod.getPrice() == null ? null : "≈ ₹" + formatInr(prod.getPrice()),
+                    prod.getPrice() == null ? null
+                            : "≈ ₹" + formatInr(prod.getPrice()) + "* (tentative)\n\n*Tentative; varies by city & gold rate",
                     buttons));
         }
 
