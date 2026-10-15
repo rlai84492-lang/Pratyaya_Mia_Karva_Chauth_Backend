@@ -408,7 +408,7 @@ public class KarixServiceImple implements KarixService {
 
             String json = objectMapper.writeValueAsString(body);
 
-
+// After this we can commed out
             log.debug("Karix -> body={}", json);
             log.info("stage=KARIX_SEND to={} step={}", maskPhone(toPhone), stepName);
             log.info("Karix -> sending to={} step={} body={}", toPhone, stepName, json);

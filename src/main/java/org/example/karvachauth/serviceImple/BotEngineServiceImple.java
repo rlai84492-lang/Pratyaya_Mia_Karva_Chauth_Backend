@@ -88,7 +88,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
-    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 10;
+    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 20;
 
     /** Max pieces listed in the Ishara (1G) — keeps the message under WhatsApp's 1024-char body limit. */
     private static final int MAX_HINT_ITEMS = 5;
@@ -100,7 +100,7 @@ public class BotEngineServiceImple implements BotEngineService {
     private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
-    private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 10;
+    private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 20;
 
     // TODO: confirm the "Browse online" link for the hint with the Mia team
     private static final String HINT_BROWSE_LINK = "https://www.miabytanishq.com/";
@@ -1393,7 +1393,8 @@ public class BotEngineServiceImple implements BotEngineService {
             cards.add(new KarixService.CarouselCard(
                     prod.getImageUrl(),
                     "*" + prod.getName() + "*",
-                    prod.getPrice() == null ? null : "≈ ₹" + formatInr(prod.getPrice()),
+                    prod.getPrice() == null ? null
+                            : "≈ ₹" + formatInr(prod.getPrice()) + "* (tentative)\n\n*Tentative; varies by city & gold rate",
                     buttons));
         }
 
@@ -1442,7 +1443,12 @@ public class BotEngineServiceImple implements BotEngineService {
      */
     private void scheduleBrowseControls(Long sessionId, String expectedStep, String category,
                                         int page, String title, boolean hasMore) {
+        LocalDateTime carouselSentAt = LocalDateTime.now();
         scheduleFollowUp(sessionId, expectedStep, BROWSE_CONTROLS_DELAY_SECONDS, "BROWSE_CONTROLS", latest -> {
+            if (messageRepository.existsBySessionIdAndDirectionAndCreatedAtAfter(sessionId, DIR_INBOUND, carouselSentAt)) {
+                log.info("stage=BROWSE_CONTROLS_SKIPPED sessionId={} — she already tapped after the carousel", sessionId);
+                return false;
+            }
             boolean samePage = category.equals(latest.getSelectedCategory())
                     && Integer.valueOf(page).equals(latest.getProductPage());
             if (samePage) {
