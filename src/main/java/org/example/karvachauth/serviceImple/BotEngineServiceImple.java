@@ -404,14 +404,21 @@ public class BotEngineServiceImple implements BotEngineService {
     @Value("${karvachauth.karwa-chauth-date:2026-10-29}")
     private String karwaChauthDate;
 
-    /**
-     * Karix template ID (delivery receipt ka "templateId") -> Reminder. Sirf yahan likhe IDs allowed hain.
-     * Testing: yahi text WhatsApp par type karo -> wahi message aata hai.
-     * TODO: har case mein Karix ka ASLI template ID bhi daalo (lowercase).
-     */
+
+
     private Reminder resolveReminder(String templateId) {
         if (templateId == null || templateId.isBlank()) return null;
         return switch (templateId.trim().toLowerCase(Locale.ROOT)) {
+            // ----- Karix production template IDs -----
+            case "mia_karwa_chauth_c1", "mia_karwa_chauth_nudge_c1_oct"                           -> W_LIST_STARTED;     // C1 wife: list bana, Ishara nahi bheja
+            case "mia_karwa_chauth_c2", "mia_karwa_chauth_nudge_c2_oct"                           -> W_HINT_SENT;        // C2 wife: Ishara bheja
+            case "mia_karwa_chauth_c3h", "mia_karwa_chauth_nudge_c3h_oct"                         -> H_BUDGET_PICKED;    // C3-H husband
+            case "mia_karwa_chauth_c3sp", "mia_karwa_chauth_nudge_c3sp",
+                 "mia_karwa_chauth_nudge_c3sp_oct"                                                -> S_LIST_ADDED;       // C3-Sp sparkle
+            case "mia_karwa_chauth_c4_oct"                                                        -> OPENER_NO_TAP;      // C4: opener mila, tap nahi kiya
+            case "mia_karwa_chauth_final"                                                         -> OCCASION_KARWA_CHAUTH; // TP4: Karwa Chauth day
+
+            // ----- testing names (WhatsApp par type karke test) -----
             case "list started, hint not sent", "list_started_hint_not_sent"             -> W_LIST_STARTED;
             case "hint sent", "hint_sent"                                                 -> W_HINT_SENT;
             case "budget picked", "budget_picked"                                         -> H_BUDGET_PICKED;
@@ -542,205 +549,6 @@ public class BotEngineServiceImple implements BotEngineService {
         log.info("stage=REMINDER_TEST_SENT step={} sessionId={} sent={}", r.step(), sessionId, mid != null);
         return mid != null;
     }
-
-//
-//    // ==================================================================
-//    // RE-ENGAGEMENT TEMPLATES (Karix campaign)
-//    //
-//    // User journey beech mein chhod deti hai -> Karix ek template bhejta hai -> uske button par
-//    // us path ka aakhri session wapas active hota hai, aur wahi PURANA function aage chalta hai.
-//    //
-//    // Naya template: (1) neeche ek Reminder banao, (2) REMINDERS mein daalo, (3) resolveReminder() mein case.
-//    // ==================================================================
-//
-//    /**
-//     * @param path    kaunsi journey (TEMPLATE_WIFE / TEMPLATE_HUSBAND / TEMPLATE_SPARKLE)
-//     * @param step    dashboard / DB mein is reminder ka step naam
-//     * @param body    test message ka text: {name} = ", Priya" (ya khaali), {days} = Karwa Chauth tak din
-//     * @param buttons {reminderPayload, buttonTitle, realPayload} — tap par realPayload ka flow chalta hai
-//     */
-//    private record Reminder(String path, String step, String body, String[][] buttons) { }
-//
-//    /** Wife — list bana li, Ishara nahi bheja */
-//    private static final Reminder W_LIST_STARTED = new Reminder(
-//            TEMPLATE_WIFE, "W_REMINDER_LIST_STARTED",
-//            "Your Ishara's almost ready{name} ✨\n"
-//                    + "You've already picked out pieces you love - all that's left is turning them into a hint he can't miss. "
-//                    + "Only {days} days to Karwa Chauth.\n"
-//                    + "Finish sharing your Ishara now, so he knows exactly what to get you this year.",
-//            new String[][]{
-//                    {"W_REMINDER_SHARE_ISHARA", "💌 Share my Ishara", "W_SEND_ISHARA"},
-//                    {"W_REMINDER_VISIT_STORE",  "Visit Store",        "BTN_STORE_FINDER"}});
-//
-//    /** Wife — Ishara bhej diya, phir chali gayi */
-//    private static final Reminder W_HINT_SENT = new Reminder(
-//            TEMPLATE_WIFE, "W_REMINDER_HINT_SENT",
-//            "You've done your part{name} 🌙\n"
-//                    + "Your Ishara's with him now - he knows exactly what to get you. "
-//                    + "If he hasn't picked up on it yet, a quick resend keeps it top of mind.\n"
-//                    + "Want to see it up close yourself? You're always welcome to swing by a Mia store - no rush, no reason needed.",
-//            new String[][]{
-//                    {"W_REMINDER_RESEND_ISHARA", "Resend my Ishara", "W_SEND_ISHARA"},
-//                    {"W_REMINDER_SEE_IN_PERSON", "See it in person", "BTN_STORE_FINDER"}});
-//
-//    /** Husband — budget chuna, phir Buy Online / Visit Store nahi dabaya */
-//    private static final Reminder H_BUDGET_PICKED = new Reminder(
-//            TEMPLATE_HUSBAND, "H_REMINDER_BUDGET_PICKED",
-//            "Still deciding{name}? 💛\n"
-//                    + "You were this close to picking something she'd love - don't let it slip past Karwa Chauth. "
-//                    + "Complete it online, or walk into a Mia store and see it in person.\n"
-//                    + "Only {days} days left to make her day special.",
-//            new String[][]{
-//                    {"H_REMINDER_BUY_ONLINE",  "Buy Online",  "IDLE_BROWSE_AGAIN"},   // usi category + budget ke products
-//                    {"H_REMINDER_VISIT_STORE", "Visit Store", "BTN_STORE_FINDER"}});
-//
-//    private static final List<Reminder> REMINDERS = List.of(W_LIST_STARTED, W_HINT_SENT, H_BUDGET_PICKED);
-//
-//    /** reminder button payload -> uska Reminder */
-//    private static final Map<String, Reminder> REMINDER_BY_PAYLOAD = new HashMap<>();
-//    /** reminder button payload -> asli journey payload */
-//    private static final Map<String, String> REMINDER_REAL_PAYLOAD = new HashMap<>();
-//
-//    static {
-//        for (Reminder r : REMINDERS) {
-//            for (String[] b : r.buttons()) {
-//                REMINDER_BY_PAYLOAD.put(b[0], r);
-//                REMINDER_REAL_PAYLOAD.put(b[0], b[2]);
-//            }
-//        }
-//    }
-//
-//    @Value("${karvachauth.karwa-chauth-date:2026-10-29}")
-//    private String karwaChauthDate;
-//
-//    /**
-//     * Karix template ID (delivery receipt ka "templateId") -> Reminder.
-//     * Testing: yahi text WhatsApp par type karo -> wahi reminder message aata hai.
-//     */
-//    private Reminder resolveReminder(String templateId) {
-//        if (templateId == null || templateId.isBlank()) return null;
-//        return switch (templateId.trim().toLowerCase(Locale.ROOT)) {
-//            // Wife — list bana, Ishara nahi bheja
-//            case "list started, hint not sent", "list_started_hint_not_sent" -> W_LIST_STARTED;
-//            // Wife — Ishara bheja, phir chali gayi            TODO: Karix ka asli template ID yahan
-//            case "hint sent", "hint_sent" -> W_HINT_SENT;
-//            // Husband — budget chuna, aage nahi badha          TODO: Karix ka asli template ID yahan
-//            case "budget picked", "budget_picked" -> H_BUDGET_PICKED;
-//            default -> null;
-//        };
-//    }
-//
-//    /** {name} -> ", Priya" (naam nahi toh khaali), {days} -> Karwa Chauth tak bache din. */
-//    private String fillReminderText(String body, String customerName) {
-//        long days;
-//        try {
-//            days = Math.max(0, ChronoUnit.DAYS.between(
-//                    LocalDate.now(ZoneId.of("Asia/Kolkata")), LocalDate.parse(karwaChauthDate.trim())));
-//        } catch (Exception e) {
-//            log.warn("karvachauth.karwa-chauth-date invalid: {}", karwaChauthDate);
-//            days = 0;
-//        }
-//        String name = (customerName == null || customerName.isBlank()) ? "" : ", " + customerName.trim();
-//        return body.replace("{name}", name).replace("{days}", String.valueOf(days));
-//    }
-//
-//    /**
-//     * Us path ki journey dobara chalu: active session usi path ka hai toh wahi;
-//     * warna us path ka aakhri session wapas active, aur doosri active journey band.
-//     */
-//    private Optional<Session> resumeSession(String to, String path) {
-//        Optional<Session> active = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
-//        if (active.isPresent() && path.equals(active.get().getPath())) {
-//            return active;
-//        }
-//        Optional<Session> last = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, path);
-//        if (last.isEmpty()) {
-//            return Optional.empty();
-//        }
-//        active.ifPresent(other -> {
-//            other.setIsActive(false);
-//            sessionRepository.save(other);
-//            log.info("stage=SESSION_CLOSED sessionId={} reason=REMINDER oldPath={}", other.getId(), other.getPath());
-//        });
-//        Session s = last.get();
-//        s.setIsActive(true);
-//        s.setLastInboundAt(LocalDateTime.now());
-//        s.setIdleNudgeSent(false);
-//        sessionRepository.save(s);
-//        log.info("stage=SESSION_RESUMED sessionId={} path={} step={}", s.getId(), path, s.getCurrentStep());
-//        return Optional.of(s);
-//    }
-//
-//    /** Karix ne reminder template bheja (pehli delivery receipt) -> us path ke aakhri session par save. */
-//    private void recordReminderTemplate(String to, Reminder r, String mid, String templateId,
-//                                        String status, String errorCode, String errorReason) {
-//        Customer customer = findOrCreateCustomer(to);
-//        Long sessionId = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, r.path())
-//                .map(Session::getId).orElse(null);
-//        boolean failed = MSG_STATUS_FAILED.equals(status);
-//        messageRepository.save(Message.builder()
-//                .customerId(customer.getId())
-//                .sessionId(sessionId)
-//                .phone(to)
-//                .direction(DIR_OUTBOUND)
-//                .karixMessageId(mid)
-//                .status(status)
-//                .step(r.step())
-//                .messageType("template")
-//                .templateName(templateId)
-//                .errorCode(failed ? errorCode : null)
-//                .errorReason(failed && errorReason != null
-//                        ? errorReason.substring(0, Math.min(errorReason.length(), 500)) : null)
-//                .statusUpdatedAt(LocalDateTime.now())
-//                .build());
-//        log.info("stage=REMINDER_TEMPLATE_RECORDED step={} customerId={} sessionId={} status={}",
-//                r.step(), customer.getId(), sessionId, status);
-//    }
-//
-//    /** TEST: template ka naam type karo -> wahi message free-form (24h window ke andar) aata hai. */
-//    private boolean sendReminderTest(String to, Reminder r) {
-//        Customer customer = findOrCreateCustomer(to);
-//        Long sessionId = sessionRepository.findFirstByPhoneAndPathOrderByIdDesc(to, r.path())
-//                .map(Session::getId).orElse(null);
-//
-//        String body = fillReminderText(r.body(), customer.getName());
-//        List<String[]> buttons = Arrays.stream(r.buttons())
-//                .map(b -> new String[]{b[0], b[1]})
-//                .toList();
-//        String mid = karixService.sendButtonMessage(to, body, buttons);
-//
-//        messageRepository.save(Message.builder()
-//                .customerId(customer.getId())
-//                .sessionId(sessionId)
-//                .phone(to)
-//                .direction(DIR_OUTBOUND)
-//                .karixMessageId(mid)
-//                .status(mid != null ? MSG_STATUS_SENT : MSG_STATUS_FAILED)
-//                .step(r.step())
-//                .messageType("button")
-//                .statusUpdatedAt(LocalDateTime.now())
-//                .build());
-//        log.info("stage=REMINDER_TEST_SENT step={} sessionId={} sent={}", r.step(), sessionId, mid != null);
-//        return mid != null;
-//    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     /**
