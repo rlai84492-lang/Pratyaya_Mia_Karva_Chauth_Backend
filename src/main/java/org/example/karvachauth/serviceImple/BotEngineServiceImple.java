@@ -162,7 +162,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
-    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 20;
+    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 30;
 
     /** Max pieces listed in the Ishara (1G) — keeps the message under WhatsApp's 1024-char body limit. */
     private static final int MAX_HINT_ITEMS = 5;
@@ -176,6 +176,8 @@ public class BotEngineServiceImple implements BotEngineService {
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
     private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 20;
 
+    private static final long SPARKLE_CLOSE_DELAY_SECONDS = 5;
+
     // TODO: confirm the "Browse online" link for the hint with the Mia team
     private static final String HINT_BROWSE_LINK = "https://www.miabytanishq.com/";
 
@@ -185,7 +187,7 @@ public class BotEngineServiceImple implements BotEngineService {
 
     private static final String[][] CATEGORIES = {
             {"PEND", "Pendants",            "Dainty to dazzling – a piece for everyday wear",  IMG + "Pendants.png"},
-            {"MSUT", "Mia Sutra",           "✨ The new collection – the piece for today",      "https://titanwatchimages123.blob.core.windows.net/watch-images/mia-sutra-kc.png"},
+            {"MSUT", "Mia Sutra",           "The new collection – the piece for today",      "https://titanwatchimages123.blob.core.windows.net/watch-images/mia-sutra-kc.png"},
             {"PNCH", "Pendant & Chain",     "Ready-to-wear sets, chain included",              IMG + "Pendant%20&%20Chain.png"},
             {"NECK", "Necklaces",           "For the days that call for a little extra shine", IMG + "Necklaces.png"},
             {"EARR", "Earrings",            "Studs & drops that do all the talking",           IMG + "Earrings.png"},
@@ -2279,7 +2281,9 @@ public class BotEngineServiceImple implements BotEngineService {
         recordOutbound(session, "text", text, mid);
         log.info("stage=SPARKLE_OPT_IN sessionId={} sent={}", session.getId(), mid != null);
 
-        return closeJourney(session);
+        scheduleFollowUp(session.getId(), STEP_S_REINFORCE, SPARKLE_CLOSE_DELAY_SECONDS,
+                "SPARKLE_CLOSE", this::closeJourney);
+        return mid != null;
     }
 
     /** Sparkle "✕ No thanks" — record the no, then close. */
