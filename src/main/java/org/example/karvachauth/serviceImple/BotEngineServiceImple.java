@@ -163,18 +163,18 @@ public class BotEngineServiceImple implements BotEngineService {
     // TODO: confirm the "Browse online" link for the hint with the Mia team
     private static final String HINT_BROWSE_LINK = "https://www.miabytanishq.com/";
 
-    // TODO: replace with Karva Chauth images from the Mia team. These are the Rakhi images — fine for testing.
-    private static final String IMG = "https://titanwatchimages123.blob.core.windows.net/miarakhi/";
+
+    private static final String KC_IMG = "https://titanwatchimages123.blob.core.windows.net/watch-images/";
 
 
     private static final String[][] CATEGORIES = {
-            {"PEND", "Pendants",            "Dainty to dazzling – a piece for everyday wear",  IMG + "Pendants.png"},
-            {"MSUT", "Mia Sutra",           "The new collection – the piece for today",      "https://titanwatchimages123.blob.core.windows.net/watch-images/mia-sutra-kc.png"},
-            {"PNCH", "Pendant & Chain",     "Ready-to-wear sets, chain included",              IMG + "Pendant%20&%20Chain.png"},
-            {"NECK", "Necklaces",           "For the days that call for a little extra shine", IMG + "Necklaces.png"},
-            {"EARR", "Earrings",            "Studs & drops that do all the talking",           IMG + "Earrings.png"},
-            {"RING", "Rings",               "A little gold for every gesture",                 IMG + "Rings.png"},
-            {"BRBG", "Bracelets & Bangles", "Wrist candy, the grown-up way",                   IMG + "Bracelets%20&%20Bangles.png"}
+            {"PEND", "Pendants", "Dainty to dazzling – a piece for everyday wear", KC_IMG + "Pendants.png"},
+            {"MSUT", "Mia Sutra", "The new collection – the piece for today", KC_IMG + "Mia%20Sutra.png"},
+            {"PNCH", "Pendant & Chain", "Ready-to-wear sets, chain included", KC_IMG + "Pendant%20&%20Chain.png"},
+            {"NECK", "Necklaces", "For the days that call for a little extra shine", KC_IMG + "Necklaces.png"},
+            {"EARR", "Earrings", "Studs & drops that do all the talking", KC_IMG + "Earrings.png"},
+            {"RING", "Rings", "A little gold for every gesture", KC_IMG + "Rings.png"},
+            {"BRBG", "Bracelets & Bangles", "Wrist candy, the grown-up way", KC_IMG + "Bracelets%20&%20Bangles.png"}
     };
 
     // ==================================================================
