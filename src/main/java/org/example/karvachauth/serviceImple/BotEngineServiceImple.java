@@ -162,7 +162,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
-    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 30;
+    private static final long BROWSE_CONTROLS_DELAY_SECONDS = 40;
 
     /** Max pieces listed in the Ishara (1G) — keeps the message under WhatsApp's 1024-char body limit. */
     private static final int MAX_HINT_ITEMS = 5;
@@ -171,7 +171,7 @@ public class BotEngineServiceImple implements BotEngineService {
      * Seconds between the Ishara (1G) and "Want to see them in person?" (1H).
      * WhatsApp doesn't tell us when she taps a URL button, so 1H is sent after a pause instead.
      **/
-    private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 10;
+    private static final long HINT_TO_STORE_INVITE_DELAY_SECONDS = 25;
 
     /** Seconds between the "Buy Online" link (2C) and "shall we remember her birthday?" (2E). Same reason as above. */
     private static final long BUY_ONLINE_TO_DETAILS_DELAY_SECONDS = 20;
