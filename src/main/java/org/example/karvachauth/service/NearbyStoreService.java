@@ -43,6 +43,7 @@ public class NearbyStoreService {
         try {
             List<MiaStore> list = miaStoreRepository.findByStatusIgnoreCase("Active").stream()
                     .filter(s -> s.getLatitude() != null && s.getLongitude() != null)
+                    .filter(s -> s.getLatitude().signum() != 0 && s.getLongitude().signum() != 0)   // 0,0 = location missing
                     .filter(s -> s.getShortName() != null && !s.getShortName().isBlank())
                     .toList();
             activeStores = list;
@@ -59,9 +60,13 @@ public class NearbyStoreService {
             reload();                       // first call after a failed startup load
             stores = activeStores;
         }
+        // Same store twice in the table (same short_name) -> show it once.
+        // WhatsApp Flow dropdown needs UNIQUE ids, a duplicate makes the form fail ("Something went wrong").
+        java.util.Set<String> seen = new java.util.HashSet<>();
         return stores.stream()
                 .sorted(Comparator.comparingDouble(s ->
                         distanceKm(lat, lng, s.getLatitude().doubleValue(), s.getLongitude().doubleValue())))
+                .filter(s -> seen.add(norm(s.getCity()) + "|" + norm(s.getShortName())))
                 .limit(Math.max(1, limit))
                 .toList();
     }
@@ -74,6 +79,32 @@ public class NearbyStoreService {
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    /**
+     * Store code for the store she picked from the list (row id carries city + shortName).
+     * Matches shortName (case/space-insensitive), city too when given. null if not found.
+     */
+    public String storeCodeFor(String shortName, String city) {
+        if (shortName == null || shortName.isBlank()) return null;
+        String name = norm(shortName);
+        String c = city == null ? null : norm(city);
+        List<MiaStore> stores = activeStores;
+        if (stores.isEmpty()) {
+            reload();
+            stores = activeStores;
+        }
+        MiaStore byNameOnly = null;
+        for (MiaStore s : stores) {
+            if (!name.equals(norm(s.getShortName()))) continue;
+            if (c == null || c.isEmpty() || c.equals(norm(s.getCity()))) return s.getStoreCode();
+            if (byNameOnly == null) byNameOnly = s;
+        }
+        return byNameOnly == null ? null : byNameOnly.getStoreCode();
+    }
+
+    private static String norm(String s) {
+        return s == null ? "" : s.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
     }
 
     public int activeCount() {

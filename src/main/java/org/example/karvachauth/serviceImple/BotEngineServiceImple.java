@@ -31,12 +31,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.DateTimeException;
@@ -86,10 +82,11 @@ public class BotEngineServiceImple implements BotEngineService {
     private final BookingRepository bookingRepository;           // C2 store visits — PENDING (store picked) → CONFIRMED
     private final TaskScheduler taskScheduler;   // needs @EnableScheduling on the application class
 
-//    CHANGE 2: fields mein ADD karo (bookingRepository wali line ke neeche) ----------
-//    private final BookingRepository bookingRepository;           // (existing line — mat chhedo)
     private final NearbyStoreService nearbyStoreService;         // NEW: KC ka apna store list (DT par depend nahi)
-
+    /** Same customer ko "buttons use karo" nudge 10 min mein ek hi baar (spam nahi). */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> lastHelpNudgeAt =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long HELP_NUDGE_GAP_MS = 10 * 60 * 1000L;
 
     // ---------- C2 — nearby store API ----------
     @Value("${karvachauth.store-api.url:https://tw-dashboard.centralindia.cloudapp.azure.com/api/dhanteras/store-names/nearby}")
@@ -126,21 +123,6 @@ public class BotEngineServiceImple implements BotEngineService {
     private static final SecureRandom BOOKING_RANDOM = new SecureRandom();
     private static final DateTimeFormatter VISIT_DATE_TEXT = DateTimeFormatter.ofPattern("EEE, d MMM uuuu", Locale.ENGLISH);
     private static final DateTimeFormatter VISIT_TIME_TEXT = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
-//    private static final DateTimeFormatter VISIT_EXAMPLE = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
-
-//    /**
-//     * Visit date & time — no slash needed, am / pm in any case:
-//     * "16 10 5 pm", "16 oct 5:30pm", "16 October 2026 5:30 PM", "Oct 16 6.30 pm", "16/10/2026 17:30", "tomorrow 5pm".
-//     * VISIT_TIME takes the time off the end; the rest must match one of the date shapes below.
-//     */
-//    private static final java.util.regex.Pattern VISIT_TIME = java.util.regex.Pattern.compile(
-//            "^(.*?)[\\s,]*(?:\\bat\\s*)?(?<!\\d)(\\d{1,2})(?:\\s*[:.]\\s*(\\d{2}))?\\s*(am|pm|a\\.m\\.?|p\\.m\\.?)?$");
-//    private static final java.util.regex.Pattern VISIT_DATE_NUMBERS = java.util.regex.Pattern.compile(
-//            "^(\\d{1,2})(?:st|nd|rd|th)?[\\s/.-]+(\\d{1,2})(?:[\\s/.-]+(\\d{4}|(?<=[/.-])\\d{2}))?$");
-//    private static final java.util.regex.Pattern VISIT_DATE_DAY_MONTH = java.util.regex.Pattern.compile(
-//            "^(\\d{1,2})(?:st|nd|rd|th)?[\\s/.-]*(?:of\\s+)?([a-z]{3,9})\\.?(?:[\\s/.-]+(\\d{4}))?$");
-//    private static final java.util.regex.Pattern VISIT_DATE_MONTH_DAY = java.util.regex.Pattern.compile(
-//            "^([a-z]{3,9})\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?$");
 
     /**
      * The last message recordOutbound() saved on this thread, for moveTo() to put on the new step.
@@ -196,16 +178,6 @@ public class BotEngineServiceImple implements BotEngineService {
     };
 
     // ==================================================================
-    // STEP 0 — OPENER
-    //
-    //   Karix template reaches her            → session on OPENER (no path yet)
-    //   she taps "I'm celebrating" / …        → path saved, "Choose my gift" / … sent — still OPENER
-    //   she taps "Choose my gift" / "Find her a gift" / "Show me"
-    //                                         → W_CHOOSE_MY_GIFT / H_FIND_HER_GIFT / S_SHOW_ME
-    //   or she taps "Visit nearby store"      → BOOK_STORE_VISIT (C2)
-    //
-    // So until she taps one of those two buttons she shows as OPENER everywhere.
-    // ==================================================================
     /** "karva chauth" / "karwa chauth" / "karvachauth" / "Karwa Chouth"… type kare toh opener. */
     /** Pura message sirf ye shabd ho toh journey shuru: wife / husband / sparkle. */
     private static final java.util.regex.Pattern KARVA_KEYWORD =
@@ -226,19 +198,6 @@ public class BotEngineServiceImple implements BotEngineService {
         };
     }
 
-//    private static boolean isOpenerKeyword(String text) {
-//        if (text == null || text.length() > KEYWORD_MAX_LENGTH) return false;   // lambe jawab journey nahi todenge
-//        String letters = text.toLowerCase().replaceAll("[^a-z]", "");
-//        return OPENER_KEYWORD.matcher(letters).find();
-//    }
-    /**
-     * The Step 0 template — sent from the Karix portal, not by us, so we first see it when its first
-     * delivery receipt reaches the webhook. Saves the customer, a session on OPENER and the template
-     * message (on OPENER, linked to that session).
-     *
-     * No new session if the template FAILED (she never got it), or if she's in the middle of a journey —
-     * her current buttons must keep working; tapping the new template starts a fresh journey anyway.
-     */
     @Override
     public void recordOpenerTemplate(String phone, String mid, String templateId,
                                      String status, String errorCode, String errorReason) {
@@ -248,16 +207,13 @@ public class BotEngineServiceImple implements BotEngineService {
             return;
         }
 
-//        // Re-engagement template opener nahi hai — naya OPENER session mat banao
-//        Reminder reminder = resolveReminder(templateId);
-//        if (reminder != null) {
-//            try {
-//                recordReminderTemplate(to, reminder, mid, templateId, status, errorCode, errorReason);
-//            } catch (Exception e) {
-//                log.error("Failed to record reminder template mid={}", mid, e);
-//            }
-//            return;
-//        }
+
+
+
+
+
+
+
 
         // Re-engagement / occasion template: apne session par save, naya OPENER session mat banao.
         // OPENER_NO_TAP (path null) opener jaisa hi hai -> neeche wala normal opener logic chalne do.
@@ -317,15 +273,35 @@ public class BotEngineServiceImple implements BotEngineService {
         }
     }
 
+    /** Beech journey mein random text -> chhota sa hint (10 min mein max 1 baar). */
+    private boolean sendUseButtonsHint(Session session) {
+        long now = System.currentTimeMillis();
+        Long last = lastHelpNudgeAt.get(session.getPhone());
+        if (last != null && now - last < HELP_NUDGE_GAP_MS) {
+            log.info("stage=HELP_HINT_SKIPPED sessionId={} — sent recently", session.getId());
+            return false;
+        }
+        lastHelpNudgeAt.put(session.getPhone(), now);
+        String text = "Please tap one of the options above to continue 👆\n"
+                + "Or type *Karwa Chauth* to start again.";
+        String mid = karixService.sendTextMessage(session.getPhone(), text);
+        recordOutbound(session, "text", text, mid);
+        log.info("stage=HELP_HINT_SENT sessionId={} step={} sent={}", session.getId(), session.getCurrentStep(), mid != null);
+        return mid != null;
+    }
 
-    // ==================================================================
-    // RE-ENGAGEMENT / OCCASION TEMPLATES (Karix campaign)
-    //
-    // Karix template bhejta hai -> user button dabata hai -> PAYLOAD hamare server par aata hai
-    // -> us journey ka session wapas active -> wahi PURANA function aage chalta hai.
-    //
-    // Naya template: (1) Reminder banao, (2) REMINDERS mein daalo, (3) resolveReminder() mein case.
-    // ==================================================================
+
+    private boolean sendStartMenu(String to, String reason) {
+        String text = "Hi there ✨ Let's find something beautiful this Karwa Chauth.\n"
+                + "Tell us, what's the plan?";
+        List<String[]> buttons = List.of(
+                new String[]{"BTN_CELEBRATING",      "💛 I'm celebrating"},
+                new String[]{"BTN_SHOPPING_FOR_HER", "🎁 Shopping for her"},
+                new String[]{"BTN_SPARKLE",          "✨ Here for sparkle"});
+        String mid = karixService.sendButtonMessage(to, text, buttons);
+        log.info("stage=START_MENU_SENT reason={} sent={}", reason, mid != null);
+        return mid != null;
+    }
 
     /** Reminder.path ke special values */
     private static final String PATH_OPENER = null;   // opener jaisa: buttons = opener payloads (step0Path handle karta hai)
@@ -691,29 +667,6 @@ public class BotEngineServiceImple implements BotEngineService {
         // Carousel buttons come back with "_<cardIndex>" appended (CAT_PEND_0) — strip it before routing
         String p = payload.trim().replaceAll("_\\d+$", "");
 
-//        // Re-engagement template ka button -> us path ka aakhri session wapas, phir asli payload ka flow
-//        Reminder reminder = REMINDER_BY_PAYLOAD.get(p);
-//        Optional<Session> found = reminder != null
-//                ? resumeSession(to, reminder.path())
-//                : sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
-//
-//        if (found.isEmpty()) {
-//            if (reminder != null) {
-//                // Is path par kabhi journey hi nahi ki -> shuru se
-//                log.info("stage=REMINDER_NO_SESSION path={} — starting journey", reminder.path());
-//                startFromOpener(to, null, reminder.path(), payload.trim(), null);
-//                return true;
-//            }
-//            log.warn("stage=NO_ACTIVE_SESSION payload={} — send the opener first", p);
-//            return false;
-//        }
-//
-//        Session session = found.get();
-//        if (reminder != null) {
-//            String real = REMINDER_REAL_PAYLOAD.get(p);
-//            log.info("stage=REMINDER_TAP sessionId={} step={} payload={} -> {}", session.getId(), reminder.step(), p, real);
-//            p = real;   // W_SEND_ISHARA / BTN_STORE_FINDER / IDLE_BROWSE_AGAIN -> purana flow aage chalega
-//        }
 
 
         // Re-engagement / occasion template ka button -> journey wapas, phir asli payload ka flow
@@ -858,22 +811,6 @@ public class BotEngineServiceImple implements BotEngineService {
         return handled;
     }
 
-    /**
-     * The step a tap itself stands for, or null if the tap is just an answer on the current step.
-     *
-     *   "Choose my gift" / "Find her a gift" / "Show me"  → W_CHOOSE_MY_GIFT / H_FIND_HER_GIFT / S_SHOW_ME
-     *   a category ("Browse these", CAT_*)                → W_PICK_CATEGORY / H_PICK_CATEGORY / S_PICK_CATEGORY
-     *
-     *   "Visit nearby store" / "Visit Store" (BTN_STORE_FINDER, VISIT_<sku>) → BOOK_STORE_VISIT, on every path
-     *
-     * The reply then moves the session on (products → W_BROWSE_PRODUCTS, budget buttons → H_BUDGET / S_BUDGET),
-     * but the tap and the reply stay saved on the step she chose.
-     *
-     * C2 (Book a store visit): the store tap and the booking form sent after it are both saved on
-     * BOOK_STORE_VISIT — that step means "started booking". The booking is complete only when she submits
-     * the form: that writes a Booking row and a STORE_VISIT_BOOKED lead, sends the confirmed card, and then
-     * afterStoreVisitBooked() moves her on (1I / 2E).
-     */
     private static String stepForTap(String path, String p) {
         if (path == null) return null;
         if (isStoreVisitTap(p)) return STEP_BOOK_STORE_VISIT;
@@ -889,11 +826,6 @@ public class BotEngineServiceImple implements BotEngineService {
         };
     }
 
-    /**
-     * C2 — "Visit nearby store" / "Visit Store" tapped: asks her to share her current location.
-     * The message is saved on BOOK_STORE_VISIT. Her location comes back as a "location" message
-     * → onLocationShared() → the 3 nearest Mia stores.
-     */
     private boolean askForLocation(Session session) {
         String text = "Let's find a Mia store near you 📍 "
                 + "Tap *Send location* below to share your current location.";
@@ -933,9 +865,10 @@ public class BotEngineServiceImple implements BotEngineService {
         }
         Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
         if (found.isEmpty() || found.get().getPath() == null) {
-            log.warn("stage=LOCATION_NO_SESSION — no active journey for this location");
-            return false;
+            log.warn("stage=LOCATION_NO_SESSION — no active journey, sending start menu");
+            return sendStartMenu(to, "LOCATION_WITHOUT_JOURNEY");
         }
+
         Session session = found.get();
 
         try {
@@ -979,29 +912,6 @@ public class BotEngineServiceImple implements BotEngineService {
             return mid != null;
         }
 
-//        List<String[]> rows = new ArrayList<>();
-//        for (String[] store : stores) {
-//            String name = store[0];
-//            String city = store[1];
-//            String place = name.replaceFirst("(?i)^mia\\s+by\\s+tanishq\\s*,\\s*", "");
-//            int comma = place.indexOf(',');
-//            String rowTitle = comma > 0 ? place.substring(0, comma).trim() : place;
-//            String rowDescription = comma > 0 ? place.substring(comma + 1).trim() : city;
-//            String rowId = "STORE_" + city + "|" + name;
-//            rows.add(new String[]{
-//                    rowId.length() <= 200 ? rowId : rowId.substring(0, 200),
-//                    fit(rowTitle, 24),
-//                    fit(rowDescription, 72)});
-//        }
-
-//        String text = "Here are the Mia stores closest to you 📍\n"
-//                + "Pick one, and I'll book your visit.";
-//        String mid = karixService.sendListMessage(session.getPhone(), text, "Choose a store", rows);
-//        recordOutbound(session, "interactive", text + "\n\n"
-//                + stores.stream().map(s -> "• " + s[0]).collect(Collectors.joining("\n")), mid);
-//        moveTo(session, STEP_STORE_PICK);
-//        log.info("stage=NEARBY_STORES_SENT sessionId={} stores={} sent={}", session.getId(), stores.size(), mid != null);
-//        return mid != null;
         // C2 (Flow) — the 3 stores go into the "Book Appointment" WhatsApp Flow: store + date + time in one form
         List<Map<String, Object>> storeList = new ArrayList<>();
         for (String[] store : stores) {
@@ -1014,50 +924,6 @@ public class BotEngineServiceImple implements BotEngineService {
                 "Here are the Mia stores closest to you 📍\nTap *Book Store Visit* to pick a store, date and time.");
     }
 
-    /**
-     * Calls the nearby-store API: GET {url}?lat=..&lng=..&limit=3 with header X-Api-Key.
-     * Returns {shortName, city} per store, nearest first. Empty list if the API fails — never throws.
-     */
-//    private List<String[]> findNearbyStores(double lat, double lng) {
-//        if (storeApiKey == null || storeApiKey.isBlank()) {
-//            log.error("stage=STORE_API_NOT_CONFIGURED — set karvachauth.store-api.key");
-//            return List.of();
-//        }
-//        try {
-//            String url = storeApiUrl + "?lat=" + lat + "&lng=" + lng + "&limit=" + NEARBY_STORE_LIMIT;
-//            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-//                    .timeout(Duration.ofSeconds(8))
-//                    .header("X-Api-Key", storeApiKey)
-//                    .header("Accept", "application/json")
-//                    .GET()
-//                    .build();
-//            HttpResponse<String> response = STORE_HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-//            if (response.statusCode() != 200) {
-//                log.warn("stage=STORE_API_FAILED httpStatus={}", response.statusCode());
-//                return List.of();
-//            }
-//            JsonNode root = STORE_JSON.readTree(response.body());
-//            if (!root.path("success").asBoolean(false)) {
-//                log.warn("stage=STORE_API_FAILED success=false");
-//                return List.of();
-//            }
-//            List<String[]> stores = new ArrayList<>();
-//            for (JsonNode store : root.path("stores")) {
-//                String name = store.path("shortName").asText("").trim();
-//                String city = store.path("city").asText("").trim();
-//                if (!name.isEmpty() && stores.size() < NEARBY_STORE_LIMIT) stores.add(new String[]{name, city});
-//            }
-//            log.info("stage=STORE_API_OK count={}", stores.size());
-//            return stores;
-//        } catch (InterruptedException e) {
-//            Thread.currentThread().interrupt();
-//            log.error("stage=STORE_API_FAILED — interrupted");
-//            return List.of();
-//        } catch (Exception e) {
-//            log.error("stage=STORE_API_FAILED", e);
-//            return List.of();
-//        }
-//    }
 
 
 
@@ -1098,12 +964,7 @@ public class BotEngineServiceImple implements BotEngineService {
         return fit(storeName.replaceFirst("(?i)^mia\\s+by\\s+tanishq\\s*,\\s*", ""), 30);
     }
 
-    /**
-     * C2 (Flow) — she submitted the booking form. response_json = {"store": "<city>|<shortName>",
-     * "visitDate": "2026-10-20", "timeSlot": "6-7", "flow_token": "BOOK_<sessionId>"}.
-     * Valid → bookings row CONFIRMED + STORE_VISIT_BOOKED lead + "Your visit is booked", then 1I / 2E.
-     * Past slot / missing value → explains and sends the form again with the store she picked.
-     */
+
     @Override
     public boolean onFlowReply(String phone, String responseJson) {
         lastOutbound.remove();
@@ -1190,6 +1051,34 @@ public class BotEngineServiceImple implements BotEngineService {
             return sent;
         }
 
+        Optional<Booking> lastConfirmed = bookingRepository
+                .findFirstBySessionIdAndStatusOrderByIdDesc(session.getId(), BOOKING_CONFIRMED);
+        if (lastConfirmed.isPresent()) {
+            Booking b = lastConfirmed.get();
+            boolean sameVisit = fit(storeName, 200).equals(b.getStoreName())
+                    && visitDate.equals(b.getVisitDate())
+                    && slot[0].equals(b.getTimeSlot());
+            if (sameVisit) {
+                log.info("stage=BOOKING_DUPLICATE_SKIPPED sessionId={} bookingRef={}", session.getId(), b.getBookingRef());
+                String again = "You're all set 💛 Your visit is already booked.\n\n"
+                        + "📍 *" + b.getStoreName() + "*\n"
+                        + "📅 " + visitDate.format(VISIT_DATE_TEXT) + "\n"
+                        + "⏰ " + slot[0] + "\n"
+                        + "🔖 Booking ID: *" + b.getBookingRef() + "*";
+                String mid = karixService.sendTextMessage(session.getPhone(), again);
+                recordOutbound(session, "text", again, mid);
+                sessionRepository.save(session);
+                return mid != null;
+            }
+        }
+
+        // Store code from KC's own store list (bookings.store_code can't be null)
+        String storeCode = nearbyStoreService.storeCodeFor(storeName, city);
+        if (storeCode == null || storeCode.isBlank()) {
+            log.warn("stage=STORE_CODE_NOT_FOUND sessionId={} store={} city={}", session.getId(), storeName, city);
+            storeCode = "NA";
+        }
+
         Booking booking = bookingRepository.save(Booking.builder()
                 .bookingRef(newBookingRef())
                 .customerId(session.getCustomerId())
@@ -1197,6 +1086,7 @@ public class BotEngineServiceImple implements BotEngineService {
                 .phone(session.getPhone())
                 .path(session.getPath())
                 .storeName(fit(storeName, 200))
+                .storeCode(fit(storeCode, 20))
                 .city(city == null || city.isEmpty() ? null : fit(city, 50))
                 .visitDate(visitDate)
                 .timeSlot(slot[0])
@@ -1236,154 +1126,6 @@ public class BotEngineServiceImple implements BotEngineService {
                 "AFTER_BOOKING", this::afterStoreVisitBooked);
         return mid != null;
     }
-
-//    /**
-//     * C2 — she tapped a store in the list (row id "STORE_<city>|<shortName>").
-//     * Saves / updates this session's PENDING booking with the store and asks for the date & time.
-//     */
-//    private boolean onStorePicked(Session session, String value) {
-//        int bar = value.indexOf('|');
-//        String city = bar > 0 ? value.substring(0, bar).trim() : null;
-//        String storeName = (bar >= 0 ? value.substring(bar + 1) : value).trim();
-//        if (storeName.isEmpty()) {
-//            log.warn("stage=STORE_PICK_INVALID sessionId={}", session.getId());
-//            return askForLocation(session);
-//        }
-
-//        Booking booking = bookingRepository
-//                .findFirstBySessionIdAndStatusOrderByIdDesc(session.getId(), BOOKING_PENDING)
-//                .orElseGet(() -> Booking.builder()
-//                        .bookingRef(newBookingRef())
-//                        .customerId(session.getCustomerId())
-//                        .sessionId(session.getId())
-//                        .phone(session.getPhone())
-//                        .path(session.getPath())
-//                        .status(BOOKING_PENDING)
-//                        .build());
-//        booking.setStoreName(fit(storeName, 200));
-//        booking.setCity(city == null || city.isEmpty() ? null : fit(city, 50));
-//        booking.setReservedSkus(reservedSkus(session));
-//        bookingRepository.save(booking);
-//        session.setStoreName(fit(storeName, 200));
-//        log.info("stage=STORE_PICKED sessionId={} bookingRef={} city={}", session.getId(), booking.getBookingRef(), city);
-
-//        String example = LocalDate.now(IST).plusDays(1).format(VISIT_EXAMPLE);
-//        String question = "Lovely choice! 💛 When would you like to visit *" + storeName + "*?\n\n"
-//                + "Please send the date and time, like this: *" + example + " 5:30 pm*\n"
-//                + "(Stores are open " + STORE_OPENS.format(VISIT_TIME_TEXT) + " – " + LAST_VISIT.format(VISIT_TIME_TEXT) + ")";
-//        boolean sent = askQuestion(session, question);
-//        moveTo(session, STEP_STORE_DATETIME);
-//        return sent;
-//    }
-
-//    /** C2 — her typed date & time. Invalid → explain and ask again. Valid → booking CONFIRMED + confirmation. */
-//    private boolean onVisitDateTime(Session session, String answer) {
-//        Optional<Booking> pending = bookingRepository
-//                .findFirstBySessionIdAndStatusOrderByIdDesc(session.getId(), BOOKING_PENDING);
-//        if (pending.isEmpty()) {
-//            log.warn("stage=VISIT_NO_PENDING_BOOKING sessionId={} — asking for location again", session.getId());
-//            session.setCurrentStep(STEP_BOOK_STORE_VISIT);
-//            return askForLocation(session);
-//        }
-
-//        String example = LocalDate.now(IST).plusDays(1).format(VISIT_EXAMPLE) + " 5:30 pm";
-//        LocalDateTime visit = parseVisitDateTime(answer);
-//        if (visit == null) {
-//            return reask(session, "Hmm, I couldn't read that. Please send the date and time like this: *" + example + "*");
-//        }
-//        LocalDateTime now = LocalDateTime.now(IST);
-//        if (!visit.isAfter(now.plusMinutes(30))) {
-//            return reask(session, "That time has already passed or is too soon ⏰ Please pick a later date and time, e.g. *" + example + "*");
-//        }
-//        if (visit.toLocalDate().isAfter(now.toLocalDate().plusDays(VISIT_MAX_DAYS_AHEAD))) {
-//            return reask(session, "Please pick a date within the next " + VISIT_MAX_DAYS_AHEAD + " days, e.g. *" + example + "*");
-//        }
-//        LocalTime time = visit.toLocalTime();
-//        if (time.isBefore(STORE_OPENS) || time.isAfter(LAST_VISIT)) {
-//            return reask(session, "Stores are open " + STORE_OPENS.format(VISIT_TIME_TEXT) + " – "
-//                    + LAST_VISIT.format(VISIT_TIME_TEXT) + ". Please pick a time in between, e.g. *" + example + "*");
-//        }
-
-//        Booking booking = pending.get();
-//        booking.setVisitDate(visit.toLocalDate());
-//        booking.setTimeSlot(time.format(DateTimeFormatter.ofPattern("HH:mm")));
-//        booking.setStatus(BOOKING_CONFIRMED);
-//        booking.setConfirmedAt(LocalDateTime.now());
-//        bookingRepository.save(booking);
-
-//        recordLead(session, LEAD_STORE_VISIT_BOOKED, Lead.builder()
-//                .bookingRef(booking.getBookingRef())
-//                .storeName(booking.getStoreName())
-//                .productSkus(booking.getReservedSkus()));
-//        if (booking.getReservedSkus() != null) {
-//            List<String> skus = Arrays.asList(booking.getReservedSkus().split(","));
-//            for (Product prod : productRepository.findBySkuIn(skus)) {
-//                recordPick(session, prod.getSku(), prod.getCategory(), PICK_RESERVED);
-//            }
-//        }
-
-//        String text = "Done. Your visit is booked. 🎉\n\n"
-//                + "📍 *" + booking.getStoreName() + "*\n"
-//                + "📅 " + visit.toLocalDate().format(VISIT_DATE_TEXT) + "\n"
-//                + "⏰ " + time.format(VISIT_TIME_TEXT) + "\n"
-//                + "🔖 Booking ID: *" + booking.getBookingRef() + "*\n\n"
-//                + (booking.getReservedSkus() != null
-//                        ? "Just show this message at the store - your picks will be ready for you 💛"
-//                        : "Just show this message at the store - we can't wait to see you 💛");
-//        String mid = karixService.sendTextMessage(session.getPhone(), text);
-//        recordOutbound(session, "text", text, mid);
-//        moveTo(session, STEP_STORE_BOOKED);
-//        log.info("stage=STORE_VISIT_BOOKED sessionId={} bookingRef={} visitDate={} time={} sent={}",
-//                session.getId(), booking.getBookingRef(), booking.getVisitDate(), booking.getTimeSlot(), mid != null);
-
-//        scheduleFollowUp(session.getId(), STEP_STORE_BOOKED, AFTER_BOOKING_DELAY_SECONDS,
-//                "AFTER_BOOKING", this::afterStoreVisitBooked);
-//        return mid != null;
-//    }
-
-//    /** "16 oct 5:30 pm" / "16 10 5pm" / "16/10/2026 17:30" / "tomorrow 5 pm" → 2026-10-16T17:30. Year optional. Null if unreadable. */
-//    private static LocalDateTime parseVisitDateTime(String raw) {
-//        String text = raw.toLowerCase(Locale.ROOT).replace(',', ' ').replaceAll("\\s+", " ").trim();
-//        java.util.regex.Matcher t = VISIT_TIME.matcher(text);
-//        if (!t.matches()) return null;
-//        try {
-//            int hour = Integer.parseInt(t.group(2));
-//            int minute = t.group(3) == null ? 0 : Integer.parseInt(t.group(3));
-//            if (t.group(4) != null) {
-//                if (hour < 1 || hour > 12) return null;
-//                hour = (hour % 12) + (t.group(4).startsWith("p") ? 12 : 0);
-//            }
-
-//            String datePart = t.group(1).trim();
-//            LocalDate today = LocalDate.now(IST);
-//            if (datePart.matches("today|aaj")) return today.atTime(hour, minute);
-//            if (datePart.matches("tomorrow|tomorow|tommorow|tmrw|kal")) return today.plusDays(1).atTime(hour, minute);
-
-//            java.util.regex.Matcher d = VISIT_DATE_NUMBERS.matcher(datePart);
-//            if (d.matches()) {
-//                int year = d.group(3) == null ? today.getYear()
-//                        : d.group(3).length() == 2 ? 2000 + Integer.parseInt(d.group(3)) : Integer.parseInt(d.group(3));
-//                return LocalDate.of(year, Integer.parseInt(d.group(2)), Integer.parseInt(d.group(1))).atTime(hour, minute);
-//            }
-
-//            String day;
-//            String monthName;
-//            String year;
-//            if ((d = VISIT_DATE_DAY_MONTH.matcher(datePart)).matches()) {
-//                day = d.group(1); monthName = d.group(2); year = d.group(3);
-//            } else if ((d = VISIT_DATE_MONTH_DAY.matcher(datePart)).matches()) {
-//                monthName = d.group(1); day = d.group(2); year = d.group(3);
-//            } else {
-//                return null;
-//            }
-//            int index = "janfebmaraprmayjunjulaugsepoctnovdec".indexOf(monthName.substring(0, 3));
-//            if (index < 0 || index % 3 != 0) return null;
-//            return LocalDate.of(year == null ? today.getYear() : Integer.parseInt(year), index / 3 + 1, Integer.parseInt(day))
-//                    .atTime(hour, minute);
-//        } catch (DateTimeException | NumberFormatException e) {
-//            return null;
-//        }
-//    }
 
     /** Pieces to keep ready at the store: her list (Wife / Sparkle), else the one piece she tapped / picked. */
     private String reservedSkus(Session session) {
@@ -1492,8 +1234,8 @@ public class BotEngineServiceImple implements BotEngineService {
         // ---------- Pending question ka jawab ----------
         Optional<Session> found = sessionRepository.findFirstByPhoneAndIsActiveTrueOrderByIdDesc(to);
         if (found.isEmpty()) {
-            log.warn("stage=NO_ACTIVE_SESSION type=text — send the opener first");
-            return false;
+            log.warn("stage=NO_ACTIVE_SESSION type=text — sending start menu");
+            return sendStartMenu(to, "TEXT_WITHOUT_JOURNEY");
         }
         Session session = found.get();
 
@@ -1514,7 +1256,9 @@ public class BotEngineServiceImple implements BotEngineService {
 //            case STEP_STORE_DATETIME     -> onVisitDateTime(session, answer);
             default -> {
                 log.info("stage=TEXT_NOT_EXPECTED sessionId={} step={} — no question pending", session.getId(), step);
-                yield false;
+                yield session.getPath() == null
+                        ? sendStartMenu(to, "TEXT_ON_OPENER")       // template mila, button nahi dabaya
+                        : sendUseButtonsHint(session);
             }
         };
 
@@ -1845,12 +1589,19 @@ public class BotEngineServiceImple implements BotEngineService {
      * Skipped if she has moved on in the meantime — tapped a product, another category,
      * or "See more" (a newer page schedules its own buttons, so the old ones would be stale).
      */
+
+
     private void scheduleBrowseControls(Long sessionId, String expectedStep, String category,
                                         int page, String title, boolean hasMore) {
-        LocalDateTime carouselSentAt = LocalDateTime.now();
+        LocalDateTime scheduledAt = LocalDateTime.now();
         scheduleFollowUp(sessionId, expectedStep, BROWSE_CONTROLS_DELAY_SECONDS, "BROWSE_CONTROLS", latest -> {
-            if (messageRepository.existsBySessionIdAndDirectionAndCreatedAtAfter(sessionId, DIR_INBOUND, carouselSentAt)) {
-                log.info("stage=BROWSE_CONTROLS_SKIPPED sessionId={} — she already tapped after the carousel", sessionId);
+            // Booked in the meantime -> old browse buttons must not come after the booking follow-up
+            boolean bookedSince = bookingRepository
+                    .findFirstBySessionIdAndStatusOrderByIdDesc(sessionId, BOOKING_CONFIRMED)
+                    .map(b -> b.getConfirmedAt() != null && b.getConfirmedAt().isAfter(scheduledAt))
+                    .orElse(false);
+            if (bookedSince) {
+                log.info("stage=BROWSE_CONTROLS_SKIPPED sessionId={} — store visit booked meanwhile", sessionId);
                 return false;
             }
             boolean samePage = category.equals(latest.getSelectedCategory())
@@ -1860,7 +1611,7 @@ public class BotEngineServiceImple implements BotEngineService {
             } else {
                 log.info("stage=BROWSE_CONTROLS_SKIPPED sessionId={} — a newer page/category is showing", sessionId);
             }
-            return false;   // nothing on the session changes, so no save (avoids clashing with her next tap)
+            return false;
         });
     }
 

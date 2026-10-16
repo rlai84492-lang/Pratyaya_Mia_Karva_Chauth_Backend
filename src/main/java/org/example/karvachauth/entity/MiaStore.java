@@ -17,7 +17,7 @@ import java.math.BigDecimal;
  * KC finds the nearest stores from here, no call to the DT server.
  */
 @Entity
-@Table(name = "mia_store")
+@Table(name = "kc_mia_store")
 @Getter
 @Setter
 @Builder

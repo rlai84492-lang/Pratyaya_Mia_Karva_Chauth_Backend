@@ -132,7 +132,6 @@ public class KarvaChauthWebhookController {
 
 
 
-
     /** Same raw Karix payload -> ngrok (laptop). Fail ho to sirf log, prod pe koi asar nahi. */
     private void forwardToDev(String eventId, String rawBody, String token) {
         if (!forwardEnabled || rawBody == null || rawBody.isBlank()) {
