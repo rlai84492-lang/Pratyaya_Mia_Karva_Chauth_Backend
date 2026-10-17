@@ -1154,6 +1154,7 @@ public class DashboardServiceImple implements DashboardService {
         booking.put("pathLabel", pathLabel(row.getPath()));
         booking.put("storeName", row.getStoreName());
         booking.put("city", row.getCity());
+        booking.put("storeCode", row.getStoreCode());
         booking.put("visitDate", row.getVisitDate());
         booking.put("timeSlot", row.getTimeSlot());
         booking.put("slotLabel", slotLabel(row.getVisitDate(), row.getTimeSlot()));

@@ -602,6 +602,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
         String getPhone();
         String getPath();
         String getStoreName();
+        String getStoreCode();           // from kc_mia_store (matched on short_name); null if not found
         String getCity();
         LocalDate getVisitDate();
         String getTimeSlot();
@@ -614,12 +615,16 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     /** One page of bookings, newest first. */
     @Query(nativeQuery = true, value =
             "SELECT b.id AS bookingId, b.booking_ref AS bookingRef, c.name AS customerName, b.phone AS phone, " +
-                    "       b.path AS path, b.store_name AS storeName, b.city AS city, b.visit_date AS visitDate, " +
+//                    "       b.path AS path, b.store_name AS storeName, b.city AS city, b.visit_date AS visitDate, " +
+                    "       b.path AS path, b.store_name AS storeName, ms.store_code AS storeCode, b.city AS city, b.visit_date AS visitDate, " +
                     "       b.time_slot AS timeSlot, b.reserved_skus AS reservedSkus, " +
                     "       p.name AS reservedProductName, b.status AS status, COALESCE(b.confirmed_at, b.created_at) AS bookedAt " +
                     "FROM bookings b " +
                     "LEFT JOIN customers c ON c.id = b.customer_id " +
                     "LEFT JOIN products p ON p.sku = b.reserved_skus " +     // matches only a single SKU
+                    // store code from kc_mia_store — the bot saves the store's short_name on the booking.
+                    // MIN(id) keeps one row per booking even if a short_name appears twice.
+                    "LEFT JOIN kc_mia_store ms ON ms.id = (SELECT MIN(m.id) FROM kc_mia_store m WHERE m.short_name = b.store_name) " +
                     "WHERE b.status IN ('CONFIRMED', 'VISITED') " +
                     "  AND (:path IS NULL OR b.path = :path) " +
                     "  AND b.confirmed_at >= :from AND b.confirmed_at < :to " +
