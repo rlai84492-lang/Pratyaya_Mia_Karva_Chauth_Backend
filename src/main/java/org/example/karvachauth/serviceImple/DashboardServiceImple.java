@@ -32,6 +32,15 @@ public class DashboardServiceImple implements DashboardService {
 
     private final DashboardRepository dashboardRepo;
 
+
+    /** metric-cards cache: same filters within 60 s -> no DB query. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Object[]> metricCardsCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+
+
+
+
     /** Same setting as the bot's idle nudge — a conversation quiet for longer than this shows as "Idle". */
     @Value("${karvachauth.idle.minutes:60}")
     private long idleMinutes;
@@ -75,35 +84,115 @@ public class DashboardServiceImple implements DashboardService {
     // METRIC CARDS
     // ==================================================================
 
-    @Override
-    public Map<String, Object> getMetricCards(String flow, String range, String startDate, String endDate) {
-        DateWindow window = resolveDateTimeRange(range, startDate, endDate);
-        String pathType = flowToPathType(flow);
+//    @Override
+//    public Map<String, Object> getMetricCards(String flow, String range, String startDate, String endDate) {
+//        DateWindow window = resolveDateTimeRange(range, startDate, endDate);
+//        String pathType = flowToPathType(flow);
+//
+//        long sent = dashboardRepo.countOutboundMessagesByStatus(ALL_SENT_STATUSES, pathType, window.from(), window.to());
+//        long delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
+//        long read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
+//        long failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
+////        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
+//        long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
+//
+//        Map<String, Object> data = new LinkedHashMap<>();
+//        data.put("messagesSent", sent);
+//        data.put("messagesPerDay", Math.round((double) sent / window.numberOfDays()));
+//        data.put("messagesDelivered", delivered);
+//        data.put("messagesFailed", failed);
+//        data.put("deliveryRate", pct(delivered, sent));
+//        data.put("readReceipts", read);
+//        data.put("openRate", pct(read, delivered));
+//        data.put("openerTaps", openerTaps);
+////        data.put("clickRate", pct(openerTaps, delivered));
+//        data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
+//        data.put("flow", normaliseFlow(flow));
+//        data.put("range", normaliseRange(range));
+//        return data;
+//    }
 
-        long sent = dashboardRepo.countOutboundMessagesByStatus(ALL_SENT_STATUSES, pathType, window.from(), window.to());
-        long delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
-        long read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
-        long failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
-//        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
-        long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
 
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("messagesSent", sent);
-        data.put("messagesPerDay", Math.round((double) sent / window.numberOfDays()));
-        data.put("messagesDelivered", delivered);
-        data.put("messagesFailed", failed);
-        data.put("deliveryRate", pct(delivered, sent));
-        data.put("readReceipts", read);
-        data.put("openRate", pct(read, delivered));
-        data.put("openerTaps", openerTaps);
-//        data.put("clickRate", pct(openerTaps, delivered));
-        data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
-        data.put("flow", normaliseFlow(flow));
-        data.put("range", normaliseRange(range));
-        return data;
+
+
+@Override
+public Map<String, Object> getMetricCards(String flow, String range, String startDate, String endDate) {
+    DateWindow window = resolveDateTimeRange(range, startDate, endDate);
+    String pathType = flowToPathType(flow);
+
+    // Same filters within 60 s -> answer from memory (many users / refreshes = one DB query)
+    String cacheKey = pathType + "|" + window.from() + "|" + window.to() + "|" + normaliseRange(range);
+    Object[] hit = metricCardsCache.get(cacheKey);
+    if (hit != null && (long) hit[0] > System.currentTimeMillis()) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cached = (Map<String, Object>) hit[1];
+        return new LinkedHashMap<>(cached);
     }
 
-    // ==================================================================
+    long sent;
+    long delivered;
+    long read;
+    long failed;
+    try {
+        // NEW: 4 counts in ONE query (same rules as countOutboundMessagesByStatus)
+        DashboardRepository.OpenerCounts c = (pathType == null)
+                ? dashboardRepo.countOpenerAll(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
+                window.from(), window.to())
+                : dashboardRepo.countOpenerByPath(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
+                pathType, window.from(), window.to());
+        sent = c == null || c.getSent() == null ? 0 : c.getSent();
+        delivered = c == null || c.getDelivered() == null ? 0 : c.getDelivered();
+        read = c == null || c.getReadCount() == null ? 0 : c.getReadCount();
+        failed = c == null || c.getFailed() == null ? 0 : c.getFailed();
+    } catch (Exception ex) {
+        // SAFETY: if the new query fails for any reason, use the old 4 queries (old behaviour)
+        log.warn("stage=METRIC_CARDS_FALLBACK reason={}", ex.getMessage());
+        sent = dashboardRepo.countOutboundMessagesByStatus(ALL_SENT_STATUSES, pathType, window.from(), window.to());
+        delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
+        read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
+        failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
+    }
+//        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
+    long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
+
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("messagesSent", sent);
+    data.put("messagesPerDay", Math.round((double) sent / window.numberOfDays()));
+    data.put("messagesDelivered", delivered);
+    data.put("messagesFailed", failed);
+    data.put("deliveryRate", pct(delivered, sent));
+    data.put("readReceipts", read);
+    data.put("openRate", pct(read, delivered));
+    data.put("openerTaps", openerTaps);
+//        data.put("clickRate", pct(openerTaps, delivered));
+    data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
+    data.put("flow", normaliseFlow(flow));
+    data.put("range", normaliseRange(range));
+
+
+
+    // Karix campaign totals (all templates, every message counted). Fails safely -> cards still load.
+    try {
+        DashboardRepository.TemplateTotals t = dashboardRepo.countTemplateTotals(
+                DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES, window.from(), window.to());
+        long tSent = t == null || t.getSent() == null ? 0 : t.getSent();
+        long tDelivered = t == null || t.getDelivered() == null ? 0 : t.getDelivered();
+        data.put("karixSent", tSent);
+        data.put("karixDelivered", tDelivered);
+        data.put("karixRead", t == null || t.getReadCount() == null ? 0 : t.getReadCount());
+        data.put("karixFailed", t == null || t.getFailed() == null ? 0 : t.getFailed());
+        data.put("karixDeliveryRate", pct(tDelivered, tSent));
+    } catch (Exception ex) {
+        log.warn("stage=KARIX_TOTALS_FAILED reason={}", ex.getMessage());
+    }
+
+    if (metricCardsCache.size() > 200) metricCardsCache.clear();
+    metricCardsCache.put(cacheKey, new Object[]{System.currentTimeMillis() + 60_000, data});
+    return data;
+}
+
+
+ // ==================================================================
     // OUTCOMES
     // An outcome that doesn't exist on the selected path comes back with total = null,
     // so the card can show "—" (e.g. Buy-online clicks on "I'm celebrating").
@@ -1629,7 +1718,7 @@ public class DashboardServiceImple implements DashboardService {
                 rows.add(row);
             }
         } else if (completedSegment != null && key.equals("store-visit-booked")) {
-            columns = List.of("Customer", "Mobile", "Path", "Boutique", "Slot", "Reserved", "Booking Ref", "Booked At");
+            columns = List.of("Customer", "Mobile", "Path", "Boutique","Store Code", "Slot", "Reserved", "Booking Ref", "Booked At");
             for (DashboardRepository.BookingRowProjection booking : dashboardRepo.findBookingsPage(
                     null, from, to, ALL_ROWS, 0)) {
                 List<String> reservedSkus = booking.getReservedSkus() == null ? List.of()
@@ -1639,6 +1728,7 @@ public class DashboardServiceImple implements DashboardService {
                 row.put("Mobile", exportPhone(booking.getPhone(), fullMobile));
                 row.put("Path", pathLabel(booking.getPath()));
                 row.put("Boutique", textOrEmpty(booking.getStoreName()));
+                row.put("Store Code", textOrEmpty(booking.getStoreCode()));
                 row.put("Slot", textOrEmpty(slotLabel(booking.getVisitDate(), booking.getTimeSlot())));
                 row.put("Reserved", textOrEmpty(reservedLabel(reservedSkus, booking.getReservedProductName())));
                 row.put("Booking Ref", textOrEmpty(booking.getBookingRef()));
@@ -1804,5 +1894,102 @@ public class DashboardServiceImple implements DashboardService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+
+
+
+    // ==================================================================
+    // RE-TARGET TEMPLATES — separate from the opener cards (those count step = OPENER only).
+    // Each row: {stepKey, label, audience, tap payloads}. Must match the Reminder list in BotEngineServiceImple.
+    // ==================================================================
+    private static final String[][] RETARGET_TEMPLATES = {
+            {"W_REMINDER_LIST_STARTED",  "List started, hint not sent", "I'm celebrating",      "W_REMINDER_SHARE_ISHARA,W_REMINDER_VISIT_STORE"},
+            {"W_REMINDER_HINT_SENT",     "Hint sent",                   "I'm celebrating",      "W_REMINDER_RESEND_ISHARA,W_REMINDER_SEE_IN_PERSON"},
+            {"H_REMINDER_BUDGET_PICKED", "Budget picked",               "Shopping for her",     "H_REMINDER_BUY_ONLINE,H_REMINDER_VISIT_STORE"},
+            {"S_REMINDER_LIST_ADDED",    "Sparkle list added",          "Here for the sparkle", "S_REMINDER_VISIT_STORE,S_REMINDER_KEEP_BROWSING"},
+            {"OPENER_REMINDER",          "Opener delivered, no tap",    "All paths",            "BTN_CELEBRATING,BTN_SHOPPING_FOR_HER,BTN_SPARKLE"},
+            {"OCCASION_KARWA_CHAUTH",    "Happy Karwa Chauth wishes",   "All customers",        "OCCASION_VISIT_STORE"},
+            {"OCCASION_FESTIVE",         "Festive season wishes",       "All customers",        "OCCASION_VISIT_STORE"},
+    };
+    /** Karix names of the "opener, no tap" template (saved with step OPENER, so found by template name). */
+    private static final List<String> OPENER_REMINDER_TEMPLATES =
+            List.of("opener delivered, no interaction", "opener_delivered_no_interaction");
+    private static final List<String> NO_MATCH = List.of("-");
+
+    private final Map<String, Object[]> retargetCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public Map<String, Object> getRetargetTemplates(String range, String startDate, String endDate) {
+        DateWindow window = resolveDateTimeRange(range, startDate, endDate);
+        String cacheKey = window.from() + "|" + window.to();
+        Object[] hit = retargetCache.get(cacheKey);
+        if (hit != null && (long) hit[0] > System.currentTimeMillis()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cached = (Map<String, Object>) hit[1];
+            return new LinkedHashMap<>(cached);
+        }
+
+        List<String> steps = new ArrayList<>();
+        for (String[] t : RETARGET_TEMPLATES) {
+            if (!"OPENER_REMINDER".equals(t[0])) steps.add(t[0]);
+        }
+
+        Map<String, DashboardRepository.RetargetSendCounts> sends = new HashMap<>();
+        for (DashboardRepository.RetargetSendCounts c : dashboardRepo.countRetargetSends(
+                steps, OPENER_REMINDER_TEMPLATES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
+                window.from(), window.to())) {
+            if (c.getStepKey() != null) sends.put(c.getStepKey(), c);
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        long totalSent = 0, totalDelivered = 0, totalRead = 0, totalTapped = 0;
+        for (String[] t : RETARGET_TEMPLATES) {
+            DashboardRepository.RetargetSendCounts c = sends.get(t[0]);
+            long sent = c == null ? 0 : valueOrZero(c.getSent());
+            long delivered = c == null ? 0 : valueOrZero(c.getDelivered());
+            long read = c == null ? 0 : valueOrZero(c.getReadCount());
+            long failed = c == null ? 0 : valueOrZero(c.getFailed());
+            long tapped = 0;
+            if (sent > 0) {
+                boolean opener = "OPENER_REMINDER".equals(t[0]);
+                tapped = dashboardRepo.countRetargetTaps(
+                        Arrays.asList(t[3].split(",")),
+                        opener ? "-" : t[0],
+                        opener ? OPENER_REMINDER_TEMPLATES : NO_MATCH,
+                        window.from(), window.to());
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("step", t[0]);
+            row.put("label", t[1]);
+            row.put("audience", t[2]);
+            row.put("sent", sent);
+            row.put("delivered", delivered);
+            row.put("read", read);
+            row.put("failed", failed);
+            row.put("tapped", tapped);
+            row.put("deliveryRate", pct(delivered, sent));
+            row.put("readRate", pct(read, delivered));
+            row.put("tapRate", Math.min(100.0, pct(tapped, delivered)));
+            rows.add(row);
+            totalSent += sent;
+            totalDelivered += delivered;
+            totalRead += read;
+            totalTapped += tapped;
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("templates", rows);
+        data.put("totalSent", totalSent);
+        data.put("totalDelivered", totalDelivered);
+        data.put("totalRead", totalRead);
+        data.put("totalTapped", totalTapped);
+        data.put("range", normaliseRange(range));
+
+
+
+        if (retargetCache.size() > 200) retargetCache.clear();
+        retargetCache.put(cacheKey, new Object[]{System.currentTimeMillis() + 60_000, data});
+        return data;
     }
 }

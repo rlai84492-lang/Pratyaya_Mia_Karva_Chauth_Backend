@@ -244,6 +244,29 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
             return WebhookResult.IGNORED;
         }
 
+
+
+        // ---- Shared WABA: Dhanteras bot ka event -> KC reply/save nahi karega ----
+        {
+            JsonNode dtRef = root.path("recipient").path("reference");
+            String dtCustRef = text(dtRef, "cust_ref");
+            String dtTags = (String.valueOf(text(dtRef, "messageTag1")) + "|" + text(dtRef, "messageTag7"))
+                    .toUpperCase(Locale.ROOT);
+            String dtFlow = text(message.path("interactive").path("nfm_reply"), "response_json");
+            String dtBody = text(message.path("text"), "body");
+
+            boolean isDt = (dtCustRef != null && dtCustRef.startsWith("dh_"))
+                    || dtTags.contains("DHANTERAS")
+                    || (dtFlow != null && dtFlow.replace(" ", "").contains("\"flow_token\":\"DH_"))
+                    || (dtBody != null && dtBody.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z]", "").equals("DHANTERAS"));
+            if (isDt) {
+                log.info("stage=IGNORED eventId={} reason=DHANTERAS_EVENT type={} mobile={}", eventId, eventType, mask(mobile));
+                return WebhookResult.IGNORED;
+            }
+        }
+
+
+
         // Detail only in DEBUG — at lakhs of events, INFO stays one line per event
         if (log.isDebugEnabled()) {
             log.debug("stage=VALIDATED eventId={} eventType={} messageType={} id={} mobile={} status={} templateId={}",
@@ -441,11 +464,28 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
                 JsonNode textNode = msg.path("text");
                 typed = textNode.isObject() ? text(textNode, "body") : text(msg, "text");
             }
-            case "button" -> {                                    // template quick reply (Step 0)
+//            case "button" -> {                                    // template quick reply (Step 0)
+//                JsonNode b = msg.path("button");
+//                payload = firstText(text(b, "payload"), text(b, "id"));
+//                title = text(b, "text");
+//            }
+
+
+            case "button" -> {                                    // template quick reply (Step 0 + cohort templates)
                 JsonNode b = msg.path("button");
                 payload = firstText(text(b, "payload"), text(b, "id"));
                 title = text(b, "text");
+                // Karix campaign bug: payload comes as the customer's mobile number -> use the button text instead
+                if (payload == null || payload.matches("\\d{8,15}")) {
+                    String mapped = payloadFromTitle(title);
+                    if (mapped != null) {
+                        log.info("stage=PAYLOAD_FROM_TITLE eventId={} rawPayload={} title={} -> {}", eventId, payload, title, mapped);
+                        payload = mapped;
+                    }
+                }
             }
+
+
             case "interactive" -> {                               // our buttons, list rows, Flow
                 JsonNode inter = msg.path("interactive");
                 JsonNode buttonReply = firstObject(inter.path("button_reply"), inter.path("buttonReply"));
@@ -498,9 +538,14 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
                 boolean handled = botEngineService.onButtonTap(phone, null, payload);   // session's own path
                 log.info("stage=BUTTON eventId={} payload={} handled={}", eventId, payload, handled);
             }
+//        } else if (typed != null && !typed.isBlank()) {
+//            botEngineService.updateCustomerName(phone, profileName);
+//            boolean handled = botEngineService.onTextMessage(phone, typed);   // wife / husband / sparkle keywords inside
+
         } else if (typed != null && !typed.isBlank()) {
             botEngineService.updateCustomerName(phone, profileName);
-            boolean handled = botEngineService.onTextMessage(phone, typed);   // wife / husband / sparkle keywords inside
+            boolean handled = botEngineService.onCtwaEntry(phone, profileName, typed)   // FB / IG / QR "[KC-..]"
+                    || botEngineService.onTextMessage(phone, typed);                     // baaki sab pehle jaisa
             log.info("stage=TEXT eventId={} handled={}", eventId, handled);
         } else if (location != null) {
             printLocation(eventId, phone, location, msg);
@@ -511,6 +556,22 @@ public class KarvaChauthWebhookServiceImpl implements KarvaChauthWebhookService 
         }
 
         if (providerMessageId != null) markProcessed(providerMessageId);
+    }
+
+
+    /** Visible button text -> our payload (used only when Karix sends a mobile number as the payload). */
+    private static String payloadFromTitle(String title) {
+        if (title == null) return null;
+        String t = title.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z ]", "").trim();
+        if (t.contains("share my ishara"))  return "W_REMINDER_SHARE_ISHARA";
+        if (t.contains("resend my ishara")) return "W_REMINDER_RESEND_ISHARA";
+        if (t.contains("buy online"))       return "H_REMINDER_BUY_ONLINE";
+        if (t.contains("keep browsing"))    return "S_REMINDER_KEEP_BROWSING";
+        if (t.contains("visit store") || t.contains("see it in person")) return "STORE_VISIT";
+        if (t.contains("celebrating"))      return "BTN_CELEBRATING";
+        if (t.contains("shopping for her")) return "BTN_SHOPPING_FOR_HER";
+        if (t.contains("sparkle"))          return "BTN_SPARKLE";
+        return null;
     }
 
     /**

@@ -41,4 +41,7 @@ public interface KarixService {
      */
     String sendFlowMessage(String toPhone, String bodyText, String flowId, String flowToken,
                            String ctaText, String screen, Map<String, Object> data);
+
+
+    String sendImageButtonMessage(String toPhone, String imageUrl, String bodyText, List<String[]> buttons);
 }

@@ -315,4 +315,14 @@ public class DashboardController {
             @RequestParam(defaultValue = "false") boolean fullMobile) {
         return ResponseEntity.ok(dashboardService.getOptedInNewArrivalsAudience(range, from, to, fullMobile));
     }
+
+
+    /** Re-target templates (W / H / S / Occasion / Opener no-tap): one row per template. */
+    @GetMapping("/retarget-templates")
+    public ResponseEntity<Map<String, Object>> retargetTemplates(
+            @RequestParam(defaultValue = "today") String range,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        return ResponseEntity.ok(dashboardService.getRetargetTemplates(range, from, to));
+    }
 }

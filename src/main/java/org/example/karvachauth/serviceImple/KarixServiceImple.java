@@ -31,6 +31,8 @@ public class KarixServiceImple implements KarixService {
 
     @Value("${karix.api.key}")
     private String karixApiKey;
+    @Value("${karvachauth.ctwa.image-url:}")
+    private String ctwaImageUrl;
 
     @Value("${karix.waba.number}")
     private String wabaNumber;
@@ -441,4 +443,60 @@ public class KarixServiceImple implements KarixService {
             return null;
         }
     }
+
+
+    /** NEW — sirf CTWA Step 0 (FB / IG / QR) ke liye: upar image, phir text, phir 3 buttons. */
+    @Override
+    public String sendImageButtonMessage(String toPhone, String imageUrl, String bodyText, List<String[]> buttons) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return sendButtonMessage(toPhone, bodyText, buttons);            // image nahi -> purana raasta
+        }
+        return postForMid(buildImageButtonPayload(toPhone, imageUrl, bodyText, buttons), toPhone, "IMAGE_BUTTON_MESSAGE");
+    }
+
+    /** NEW — buildButtonPayload ki copy + image header. Existing buildButtonPayload ko touch nahi kiya. */
+    private Map<String, Object> buildImageButtonPayload(String toPhone, String imageUrl, String bodyText, List<String[]> buttons) {
+        List<Map<String, Object>> buttonList = new ArrayList<>();
+
+        // Karix/WhatsApp allows a max of 3 quick-reply buttons per message.
+        for (String[] btn : buttons.stream().limit(3).toList()) {
+            Map<String, Object> reply = new LinkedHashMap<>();
+            reply.put("id", btn[0]);
+            reply.put("title", btn[1]);
+
+            Map<String, Object> button = new LinkedHashMap<>();
+            button.put("type", "reply");
+            button.put("reply", reply);
+            buttonList.add(button);
+        }
+
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("buttons", buttonList);
+
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("link", imageUrl);
+
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("type", "image");
+        header.put("image", image);
+
+        Map<String, Object> interactive = new LinkedHashMap<>();
+        interactive.put("type", "button");
+        interactive.put("header", header);                                    // image upar
+        interactive.put("body", Map.of("text", bodyText));
+        interactive.put("action", action);
+
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "INTERACTIVE");
+        content.put("interactive", interactive);
+
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("channel", "WABA");
+        message.put("recipient", buildRecipient(toPhone));
+        message.put("sender", buildSender());
+        message.put("content", content);
+
+        return wrap(message);
+    }
+
 }

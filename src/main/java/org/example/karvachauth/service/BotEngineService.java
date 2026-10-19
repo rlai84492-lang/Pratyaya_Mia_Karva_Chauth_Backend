@@ -44,4 +44,6 @@ public interface BotEngineService {
      * Safe to call on every inbound — does nothing if the name is empty or unchanged.
      */
     void updateCustomerName(String phone, String name);
+
+    boolean onCtwaEntry(String phone, String name, String text);
 }

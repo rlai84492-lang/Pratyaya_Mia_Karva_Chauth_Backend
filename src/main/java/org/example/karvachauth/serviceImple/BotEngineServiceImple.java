@@ -140,7 +140,12 @@ public class BotEngineServiceImple implements BotEngineService {
     /** Max product cards per carousel page (1B / 1D / "See more"). */
     private static final int PRODUCT_PAGE_SIZE = 9;
 
+
+    @Value("${karvachauth.ctwa.image-url:}")
+    private String ctwaImageUrl;
     /**
+     *
+     *
      * Seconds between the product carousel and the browse buttons (See more / Another category / Visit store).
      * The pause lets the carousel (with its images) land first, so the buttons appear BELOW it.
      */
@@ -668,7 +673,7 @@ public class BotEngineServiceImple implements BotEngineService {
         String p = payload.trim().replaceAll("_\\d+$", "");
 
 
-
+        if ("STORE_VISIT".equals(p)) p = "OCCASION_VISIT_STORE";   // cohort templates (sheet) -> store finder on her last journey
         // Re-engagement / occasion template ka button -> journey wapas, phir asli payload ka flow
         Reminder reminder = REMINDER_BY_PAYLOAD.get(p);
         Optional<Session> found = reminder != null
@@ -1196,6 +1201,54 @@ public class BotEngineServiceImple implements BotEngineService {
     // ==================================================================
     // TYPED REPLIES — answers to questions (1J on the Wife path, 2F on the Husband path)
     // ==================================================================
+
+
+
+    // ==================================================================
+    // STEP 0 (common) — FB / IG / QR click-to-WhatsApp: "... [KC-IG]" / "[KC-FB]" / "[KC-QR-CT]"
+    // ==================================================================
+    private static final java.util.regex.Pattern CTWA_TAG = java.util.regex.Pattern.compile(
+            "\\[\\s*(KC-(?:IG|FB|QR-CT))\\s*]", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** @return false when the text has no [KC-..] tag -> caller continues with onTextMessage() as before. */
+    @Override
+    public boolean onCtwaEntry(String phone, String name, String text) {
+        if (text == null) return false;
+        java.util.regex.Matcher m = CTWA_TAG.matcher(text);
+        if (!m.find()) return false;
+
+        lastOutbound.remove();
+        String to = normalizePhone(phone);
+        if (to == null) {
+            log.warn("onCtwaEntry: invalid phone");
+            return true;
+        }
+        String source = m.group(1).toUpperCase(Locale.ROOT);          // KC-IG / KC-FB / KC-QR-CT
+
+        Customer customer = getOrCreateCustomer(to, name, null);
+        Session session = startNewSession(customer, null, STEP_OPENER);   // purani journey band, nayi OPENER (path tap par set hoga)
+        recordInbound(session, "CTWA_" + source, text.trim());          // source DB me: messages.payload = CTWA_KC-IG
+
+        String first = (customer.getName() == null || customer.getName().isBlank())
+                ? "" : ", " + customer.getName().trim().split("\\s+")[0];
+        String body = "✨ Ishara, your Karwa Chauth gifting wing woman is here" + first
+                + "! Get your hint, delivered with a wink.\n\n"
+                + "And here’s a little extra sparkle: enjoy upto 100% off* on making charges of Mia Diamond Jewellery while you’re at it. 💫\n\n"
+                + "Are we doing chaand, chooda & a little extra sparkle this year? 👀 Tell us, what's the plan?\n\n"
+                + "*T&C Apply";
+        List<String[]> buttons = List.of(
+                new String[]{"BTN_CELEBRATING",      "💛 I'm celebrating"},
+                new String[]{"BTN_SHOPPING_FOR_HER", "I'm shopping for her"},
+                new String[]{"BTN_SPARKLE",          "Here for the sparkle"});
+
+//        String mid = karixService.sendButtonMessage(to, body, buttons);
+
+        String mid = karixService.sendImageButtonMessage(to, ctwaImageUrl, body, buttons);
+
+        recordOutbound(session, "interactive", body, mid);
+        log.info("stage=CTWA_OPENER sessionId={} source={} sent={}", session.getId(), source, mid != null);
+        return true;
+    }
 
     /**
      * A typed message (not a button). Only steps that ask a question expect one;

@@ -52,6 +52,19 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
 //                    "  AND (:path IS NULL OR m.path = :path) " +
 //                    "  AND m.created_at >= :from AND m.created_at < :to")
     /** Approach 2 (same as Rakhi): customers who got the opener message, counted once each. */
+//    @Query(nativeQuery = true, value =
+//            "SELECT COUNT(DISTINCT m.phone) FROM messages m " +
+//                    "LEFT JOIN sessions s ON s.id = m.session_id " +
+//                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' AND m.status IN (:statuses) " +
+//                    "  AND (:path IS NULL OR COALESCE(m.path, s.path) = :path) " +
+//                    "  AND m.created_at >= :from AND m.created_at < :to")
+//    long countOutboundMessagesByStatus(@Param("statuses") List<String> statuses,
+//                                       @Param("path") String path,
+//                                       @Param("from") LocalDateTime from,
+//                                       @Param("to") LocalDateTime to);
+
+
+    /** Opener CUSTOMERS (unique phone numbers). Fallback for getMetricCards. */
     @Query(nativeQuery = true, value =
             "SELECT COUNT(DISTINCT m.phone) FROM messages m " +
                     "LEFT JOIN sessions s ON s.id = m.session_id " +
@@ -62,6 +75,104 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                                        @Param("path") String path,
                                        @Param("from") LocalDateTime from,
                                        @Param("to") LocalDateTime to);
+
+
+    // ==================================================================
+    // METRIC CARDS — sent / delivered / read / failed in ONE query (was 4 queries)
+    // Same rules as countOutboundMessagesByStatus: OUTBOUND, step OPENER, unique phone.
+    // ==================================================================
+
+    // ==================================================================
+
+    // ==================================================================
+
+//    interface OpenerCounts {
+//        Long getSent();
+//        Long getDelivered();
+//        Long getReadCount();
+//        Long getFailed();
+//    }
+//
+//    /** flow = all: no JOIN needed. Counts MESSAGES (resends included), not customers. */
+//    @Query(nativeQuery = true, value =
+//            "SELECT COUNT(DISTINCT CASE WHEN m.status IN (:sent) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS sent, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS delivered, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS readCount, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS failed " +
+//                    "FROM messages m " +
+//                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' " +
+//                    "  AND m.created_at >= :from AND m.created_at < :to")
+//    OpenerCounts countOpenerAll(@Param("sent") List<String> sent,
+//                                @Param("delivered") List<String> delivered,
+//                                @Param("read") List<String> read,
+//                                @Param("failed") List<String> failed,
+//                                @Param("from") LocalDateTime from,
+//                                @Param("to") LocalDateTime to);
+//
+//    /** flow = wife / husband / sparkle: same counts, path from message or its session. */
+//    @Query(nativeQuery = true, value =
+//            "SELECT COUNT(DISTINCT CASE WHEN m.status IN (:sent) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS sent, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS delivered, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS readCount, " +
+//                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS failed " +
+//                    "FROM messages m " +
+//                    "LEFT JOIN sessions s ON s.id = m.session_id " +
+//                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' " +
+//                    "  AND m.created_at >= :from AND m.created_at < :to " +
+//                    "  AND COALESCE(m.path, s.path) = :path")
+//    OpenerCounts countOpenerByPath(@Param("sent") List<String> sent,
+//                                   @Param("delivered") List<String> delivered,
+//                                   @Param("read") List<String> read,
+//                                   @Param("failed") List<String> failed,
+//                                   @Param("path") String path,
+//                                   @Param("from") LocalDateTime from,
+//                                   @Param("to") LocalDateTime to);
+
+
+    // ==================================================================
+
+    interface OpenerCounts {
+        Long getSent();
+        Long getDelivered();
+        Long getReadCount();
+        Long getFailed();
+    }
+
+    /** flow = all: no JOIN needed. Counts UNIQUE CUSTOMERS (phone). */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT CASE WHEN m.status IN (:sent) THEN m.phone END) AS sent, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN m.phone END) AS delivered, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN m.phone END) AS readCount, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN m.phone END) AS failed " +
+                    "FROM messages m " +
+                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' " +
+                    "  AND m.created_at >= :from AND m.created_at < :to")
+    OpenerCounts countOpenerAll(@Param("sent") List<String> sent,
+                                @Param("delivered") List<String> delivered,
+                                @Param("read") List<String> read,
+                                @Param("failed") List<String> failed,
+                                @Param("from") LocalDateTime from,
+                                @Param("to") LocalDateTime to);
+
+    /** flow = wife / husband / sparkle: same counts, path from message or its session. */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT CASE WHEN m.status IN (:sent) THEN m.phone END) AS sent, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN m.phone END) AS delivered, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN m.phone END) AS readCount, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN m.phone END) AS failed " +
+                    "FROM messages m " +
+                    "LEFT JOIN sessions s ON s.id = m.session_id " +
+                    "WHERE m.direction = 'OUTBOUND' AND m.step = 'OPENER' " +
+                    "  AND m.created_at >= :from AND m.created_at < :to " +
+                    "  AND COALESCE(m.path, s.path) = :path")
+    OpenerCounts countOpenerByPath(@Param("sent") List<String> sent,
+                                   @Param("delivered") List<String> delivered,
+                                   @Param("read") List<String> read,
+                                   @Param("failed") List<String> failed,
+                                   @Param("path") String path,
+                                   @Param("from") LocalDateTime from,
+                                   @Param("to") LocalDateTime to);
+
 
     // ==================================================================
     // OPENER TAPS — sessions that got a path, i.e. she tapped a Step 0 button.
@@ -940,4 +1051,82 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                                                          @Param("from") LocalDateTime from,
                                                          @Param("to") LocalDateTime to,
                                                          @Param("limit") int limit);
+
+
+
+    // ==================================================================
+    // RE-TARGET TEMPLATES (cohort / occasion templates sent from Karix). Opener cards are NOT touched.
+    // ==================================================================
+
+    interface RetargetSendCounts {
+        String getStepKey();
+        Long getSent();
+        Long getDelivered();
+        Long getReadCount();
+        Long getFailed();
+    }
+
+    /** Unique customers per re-target template. W_/H_/S_/OCCASION by step, "opener, no tap" by template name. */
+    @Query(nativeQuery = true, value =
+            "SELECT CASE WHEN m.step IN (:steps) THEN m.step ELSE 'OPENER_REMINDER' END AS stepKey, " +
+                    "       COUNT(DISTINCT m.phone) AS sent, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN m.phone END) AS delivered, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN m.phone END) AS readCount, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN m.phone END) AS failed " +
+                    "FROM messages m " +
+                    "WHERE m.direction = 'OUTBOUND' " +
+                    "  AND (m.step IN (:steps) OR LOWER(m.template_name) IN (:openerTemplates)) " +
+                    "  AND m.created_at >= :from AND m.created_at < :to " +
+                    "GROUP BY stepKey")
+    List<RetargetSendCounts> countRetargetSends(@Param("steps") List<String> steps,
+                                                @Param("openerTemplates") List<String> openerTemplates,
+                                                @Param("delivered") List<String> delivered,
+                                                @Param("read") List<String> read,
+                                                @Param("failed") List<String> failed,
+                                                @Param("from") LocalDateTime from,
+                                                @Param("to") LocalDateTime to);
+
+    /** Customers who tapped one of this template's buttons after receiving it. */
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT i.phone) FROM messages i " +
+                    "WHERE i.direction = 'INBOUND' AND i.button_payload IN (:payloads) " +
+                    "  AND i.created_at >= :from AND i.created_at < :to " +
+                    "  AND EXISTS (SELECT 1 FROM messages o " +
+                    "              WHERE o.phone = i.phone AND o.direction = 'OUTBOUND' " +
+                    "                AND (o.step = :step OR LOWER(o.template_name) IN (:templates)) " +
+                    "                AND o.created_at <= i.created_at)")
+    long countRetargetTaps(@Param("payloads") List<String> payloads,
+                           @Param("step") String step,
+                           @Param("templates") List<String> templates,
+                           @Param("from") LocalDateTime from,
+                           @Param("to") LocalDateTime to);
+
+
+    // ===== Karix campaign totals: every template message (opener + cohort + occasion), MESSAGES not customers =====
+    interface TemplateTotals {
+        Long getSent();
+        Long getDelivered();
+        Long getReadCount();
+        Long getFailed();
+    }
+
+    @Query(nativeQuery = true, value =
+            "SELECT COUNT(DISTINCT COALESCE(m.karix_message_id, CONCAT('id:', m.id))) AS sent, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:delivered) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS delivered, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:read) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS readCount, " +
+                    "       COUNT(DISTINCT CASE WHEN m.status IN (:failed) THEN COALESCE(m.karix_message_id, CONCAT('id:', m.id)) END) AS failed " +
+                    "FROM messages m " +
+                    "WHERE m.direction = 'OUTBOUND' AND m.message_type = 'template' " +
+                    "  AND m.created_at >= :from AND m.created_at < :to")
+    TemplateTotals countTemplateTotals(@Param("delivered") List<String> delivered,
+                                       @Param("read") List<String> read,
+                                       @Param("failed") List<String> failed,
+                                       @Param("from") LocalDateTime from,
+                                       @Param("to") LocalDateTime to);
+
+
+
+
+
+
 }

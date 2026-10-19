@@ -10,6 +10,10 @@ public interface DashboardService {
 
     Map<String, Object> getOutcomes(String flow, String range, String startDate, String endDate);
 
+
+    /** Re-target (cohort / occasion) templates: sent, delivered, read, failed, tapped per template. */
+    Map<String, Object> getRetargetTemplates(String range, String startDate, String endDate);
+
     Map<String, Object> getFlowDropOff(String flow, String range, String startDate, String endDate);
 
     Map<String, Object> getActivity(String flow, String range, String startDate, String endDate, int limit);
