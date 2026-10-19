@@ -276,6 +276,19 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getOtherEngagedAudience(range, from, to, fullMobile));
     }
 
+    /**
+     * NEW — Stopped at the opener (all paths): tapped a Step 0 button and nothing after.
+     * The 6 "Where they stopped" cards together = Engaged, Not Finished.
+     */
+    @GetMapping("/cohorts/stopped-at-opener")
+    public ResponseEntity<Map<String, Object>> stoppedAtOpener(
+            @RequestParam(defaultValue = "today") String range,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "false") boolean fullMobile) {
+        return ResponseEntity.ok(dashboardService.getStoppedAtOpenerAudience(range, from, to, fullMobile));
+    }
+
     /** Store visit booked (all paths) */
     @GetMapping("/cohorts/store-visit-booked")
     public ResponseEntity<Map<String, Object>> storeVisitBooked(

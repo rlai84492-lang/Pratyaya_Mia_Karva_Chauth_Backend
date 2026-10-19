@@ -868,8 +868,7 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     //   LIST_STARTED_NO_HINT   Wife    — 1+ pieces on her list, no Ishara sent
     //   BROWSING_NO_PURCHASE   Husband — reached the product carousel (2B), no "Buy Online" and no store tap
     //   SHORTLISTED_NO_VISIT   Sparkle — 1+ pieces on her list, no store tap, no booking
-    //   STOPPED_AT_OPENER      — tapped a Step 0 button and nothing after (still on OPENER) — not a card;
-    //                            those customers are downloaded from the Conversations page (Step = Opener)
+    //   STOPPED_AT_OPENER      — tapped a Step 0 button and nothing after (still on OPENER) — "Stopped at the opener" card
     //   OTHER                  — engaged past the opener, not finished, not in one of the four
     //                            (e.g. still choosing a category / budget) — the "Other engaged, not finished" card
     //

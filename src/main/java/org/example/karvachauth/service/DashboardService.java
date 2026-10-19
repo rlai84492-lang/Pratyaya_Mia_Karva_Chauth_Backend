@@ -66,6 +66,9 @@ public interface DashboardService {
     /** NEW — Other engaged, not finished (all paths) */
     Map<String, Object> getOtherEngagedAudience(String range, String startDate, String endDate, boolean fullMobile);
 
+    /** NEW — Stopped at the opener (all paths) */
+    Map<String, Object> getStoppedAtOpenerAudience(String range, String startDate, String endDate, boolean fullMobile);
+
     Map<String, Object> getStoreVisitBookedAudience(String range, String startDate, String endDate, boolean fullMobile);
 
     Map<String, Object> getClickedBuyOnlineAudience(String range, String startDate, String endDate, boolean fullMobile);

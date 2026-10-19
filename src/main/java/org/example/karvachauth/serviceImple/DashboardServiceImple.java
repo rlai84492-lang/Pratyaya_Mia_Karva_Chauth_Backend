@@ -105,7 +105,7 @@ public class DashboardServiceImple implements DashboardService {
 //        data.put("readReceipts", read);
 //        data.put("openRate", pct(read, delivered));
 //        data.put("openerTaps", openerTaps);
-////        data.put("clickRate", pct(openerTaps, delivered));
+    ////        data.put("clickRate", pct(openerTaps, delivered));
 //        data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
 //        data.put("flow", normaliseFlow(flow));
 //        data.put("range", normaliseRange(range));
@@ -115,84 +115,84 @@ public class DashboardServiceImple implements DashboardService {
 
 
 
-@Override
-public Map<String, Object> getMetricCards(String flow, String range, String startDate, String endDate) {
-    DateWindow window = resolveDateTimeRange(range, startDate, endDate);
-    String pathType = flowToPathType(flow);
+    @Override
+    public Map<String, Object> getMetricCards(String flow, String range, String startDate, String endDate) {
+        DateWindow window = resolveDateTimeRange(range, startDate, endDate);
+        String pathType = flowToPathType(flow);
 
-    // Same filters within 60 s -> answer from memory (many users / refreshes = one DB query)
-    String cacheKey = pathType + "|" + window.from() + "|" + window.to() + "|" + normaliseRange(range);
-    Object[] hit = metricCardsCache.get(cacheKey);
-    if (hit != null && (long) hit[0] > System.currentTimeMillis()) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> cached = (Map<String, Object>) hit[1];
-        return new LinkedHashMap<>(cached);
-    }
+        // Same filters within 60 s -> answer from memory (many users / refreshes = one DB query)
+        String cacheKey = pathType + "|" + window.from() + "|" + window.to() + "|" + normaliseRange(range);
+        Object[] hit = metricCardsCache.get(cacheKey);
+        if (hit != null && (long) hit[0] > System.currentTimeMillis()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cached = (Map<String, Object>) hit[1];
+            return new LinkedHashMap<>(cached);
+        }
 
-    long sent;
-    long delivered;
-    long read;
-    long failed;
-    try {
-        // NEW: 4 counts in ONE query (same rules as countOutboundMessagesByStatus)
-        DashboardRepository.OpenerCounts c = (pathType == null)
-                ? dashboardRepo.countOpenerAll(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
-                window.from(), window.to())
-                : dashboardRepo.countOpenerByPath(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
-                pathType, window.from(), window.to());
-        sent = c == null || c.getSent() == null ? 0 : c.getSent();
-        delivered = c == null || c.getDelivered() == null ? 0 : c.getDelivered();
-        read = c == null || c.getReadCount() == null ? 0 : c.getReadCount();
-        failed = c == null || c.getFailed() == null ? 0 : c.getFailed();
-    } catch (Exception ex) {
-        // SAFETY: if the new query fails for any reason, use the old 4 queries (old behaviour)
-        log.warn("stage=METRIC_CARDS_FALLBACK reason={}", ex.getMessage());
-        sent = dashboardRepo.countOutboundMessagesByStatus(ALL_SENT_STATUSES, pathType, window.from(), window.to());
-        delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
-        read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
-        failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
-    }
+        long sent;
+        long delivered;
+        long read;
+        long failed;
+        try {
+            // NEW: 4 counts in ONE query (same rules as countOutboundMessagesByStatus)
+            DashboardRepository.OpenerCounts c = (pathType == null)
+                    ? dashboardRepo.countOpenerAll(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
+                    window.from(), window.to())
+                    : dashboardRepo.countOpenerByPath(ALL_SENT_STATUSES, DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES,
+                    pathType, window.from(), window.to());
+            sent = c == null || c.getSent() == null ? 0 : c.getSent();
+            delivered = c == null || c.getDelivered() == null ? 0 : c.getDelivered();
+            read = c == null || c.getReadCount() == null ? 0 : c.getReadCount();
+            failed = c == null || c.getFailed() == null ? 0 : c.getFailed();
+        } catch (Exception ex) {
+            // SAFETY: if the new query fails for any reason, use the old 4 queries (old behaviour)
+            log.warn("stage=METRIC_CARDS_FALLBACK reason={}", ex.getMessage());
+            sent = dashboardRepo.countOutboundMessagesByStatus(ALL_SENT_STATUSES, pathType, window.from(), window.to());
+            delivered = dashboardRepo.countOutboundMessagesByStatus(DELIVERED_STATUSES, pathType, window.from(), window.to());
+            read = dashboardRepo.countOutboundMessagesByStatus(READ_STATUSES, pathType, window.from(), window.to());
+            failed = dashboardRepo.countOutboundMessagesByStatus(FAILED_STATUSES, pathType, window.from(), window.to());
+        }
 //        long openerTaps = dashboardRepo.countOpenerTaps(pathType, window.from(), window.to());
-    long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
+        long openerTaps = dashboardRepo.countOpenerTapCustomers(pathType, window.from(), window.to());
 
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("messagesSent", sent);
-    data.put("messagesPerDay", Math.round((double) sent / window.numberOfDays()));
-    data.put("messagesDelivered", delivered);
-    data.put("messagesFailed", failed);
-    data.put("deliveryRate", pct(delivered, sent));
-    data.put("readReceipts", read);
-    data.put("openRate", pct(read, delivered));
-    data.put("openerTaps", openerTaps);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("messagesSent", sent);
+        data.put("messagesPerDay", Math.round((double) sent / window.numberOfDays()));
+        data.put("messagesDelivered", delivered);
+        data.put("messagesFailed", failed);
+        data.put("deliveryRate", pct(delivered, sent));
+        data.put("readReceipts", read);
+        data.put("openRate", pct(read, delivered));
+        data.put("openerTaps", openerTaps);
 //        data.put("clickRate", pct(openerTaps, delivered));
-    data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
-    data.put("flow", normaliseFlow(flow));
-    data.put("range", normaliseRange(range));
+        data.put("clickRate", Math.min(100.0, pct(openerTaps, delivered)));
+        data.put("flow", normaliseFlow(flow));
+        data.put("range", normaliseRange(range));
 
 
 
-    // Karix campaign totals (all templates, every message counted). Fails safely -> cards still load.
-    try {
-        DashboardRepository.TemplateTotals t = dashboardRepo.countTemplateTotals(
-                DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES, window.from(), window.to());
-        long tSent = t == null || t.getSent() == null ? 0 : t.getSent();
-        long tDelivered = t == null || t.getDelivered() == null ? 0 : t.getDelivered();
-        data.put("karixSent", tSent);
-        data.put("karixDelivered", tDelivered);
-        data.put("karixRead", t == null || t.getReadCount() == null ? 0 : t.getReadCount());
-        data.put("karixFailed", t == null || t.getFailed() == null ? 0 : t.getFailed());
-        data.put("karixDeliveryRate", pct(tDelivered, tSent));
-    } catch (Exception ex) {
-        log.warn("stage=KARIX_TOTALS_FAILED reason={}", ex.getMessage());
+        // Karix campaign totals (all templates, every message counted). Fails safely -> cards still load.
+        try {
+            DashboardRepository.TemplateTotals t = dashboardRepo.countTemplateTotals(
+                    DELIVERED_STATUSES, READ_STATUSES, FAILED_STATUSES, window.from(), window.to());
+            long tSent = t == null || t.getSent() == null ? 0 : t.getSent();
+            long tDelivered = t == null || t.getDelivered() == null ? 0 : t.getDelivered();
+            data.put("karixSent", tSent);
+            data.put("karixDelivered", tDelivered);
+            data.put("karixRead", t == null || t.getReadCount() == null ? 0 : t.getReadCount());
+            data.put("karixFailed", t == null || t.getFailed() == null ? 0 : t.getFailed());
+            data.put("karixDeliveryRate", pct(tDelivered, tSent));
+        } catch (Exception ex) {
+            log.warn("stage=KARIX_TOTALS_FAILED reason={}", ex.getMessage());
+        }
+
+        if (metricCardsCache.size() > 200) metricCardsCache.clear();
+        metricCardsCache.put(cacheKey, new Object[]{System.currentTimeMillis() + 60_000, data});
+        return data;
     }
 
-    if (metricCardsCache.size() > 200) metricCardsCache.clear();
-    metricCardsCache.put(cacheKey, new Object[]{System.currentTimeMillis() + 60_000, data});
-    return data;
-}
 
-
- // ==================================================================
+    // ==================================================================
     // OUTCOMES
     // An outcome that doesn't exist on the selected path comes back with total = null,
     // so the card can show "—" (e.g. Buy-online clicks on "I'm celebrating").
@@ -1542,9 +1542,14 @@ public Map<String, Object> getMetricCards(String flow, String range, String star
 //                    List.of("sparkle"), 3));
                     List.of("sparkle"), 3),
             // NEW — everyone else who engaged past the opener and hasn't finished (segment OTHER).
-            // Not in the 4 cards above, and not stopped at the opener (STOPPED_AT_OPENER — see Conversations).
+            // Not in the 4 cards above, and not stopped at the opener (STOPPED_AT_OPENER — its own card below).
             new AudienceSegment("other-engaged", "OTHER", "Other engaged, not finished",
-                    List.of("celebrating", "shopping", "sparkle"), 4));
+//                    List.of("celebrating", "shopping", "sparkle"), 4));
+                    List.of("celebrating", "shopping", "sparkle"), 4),
+            // NEW — tapped a Step 0 button and nothing after (still on OPENER).
+            // With this card the 6 cards cover every customer once, so their sum = Engaged, Not Finished.
+            new AudienceSegment("stopped-at-opener", "STOPPED_AT_OPENER", "Stopped at the opener",
+                    List.of("celebrating", "shopping", "sparkle"), 5));
 
     private static final List<AudienceSegment> COMPLETED_SEGMENTS = List.of(
             new AudienceSegment("store-visit-booked", null, "Store visit booked",
@@ -1633,6 +1638,12 @@ public Map<String, Object> getMetricCards(String flow, String range, String star
     @Override
     public Map<String, Object> getShortlistedNoVisitAudience(String range, String startDate, String endDate, boolean fullMobile) {
         return buildAudienceCardData("shortlisted-no-visit", range, startDate, endDate, fullMobile);
+    }
+
+    /** NEW — Stopped at the opener (all paths): tapped a Step 0 button, then nothing else. */
+    @Override
+    public Map<String, Object> getStoppedAtOpenerAudience(String range, String startDate, String endDate, boolean fullMobile) {
+        return buildAudienceCardData("stopped-at-opener", range, startDate, endDate, fullMobile);
     }
 
     /** NEW — Other engaged, not finished (all paths): past the opener, not in the 4 cards, not finished. */
