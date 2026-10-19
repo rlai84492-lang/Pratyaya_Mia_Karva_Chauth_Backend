@@ -263,6 +263,19 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getShortlistedNoVisitAudience(range, from, to, fullMobile));
     }
 
+    /**
+     * NEW — Other engaged, not finished (all paths): engaged past the opener, not finished,
+     * and not in the 4 cards above. Customers who stopped at the opener are not included.
+     */
+    @GetMapping("/cohorts/other-engaged")
+    public ResponseEntity<Map<String, Object>> otherEngaged(
+            @RequestParam(defaultValue = "today") String range,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "false") boolean fullMobile) {
+        return ResponseEntity.ok(dashboardService.getOtherEngagedAudience(range, from, to, fullMobile));
+    }
+
     /** Store visit booked (all paths) */
     @GetMapping("/cohorts/store-visit-booked")
     public ResponseEntity<Map<String, Object>> storeVisitBooked(

@@ -59,6 +59,9 @@ public interface DashboardService {
 
     Map<String, Object> getShortlistedNoVisitAudience(String range, String startDate, String endDate, boolean fullMobile);
 
+    /** NEW — Other engaged, not finished (all paths) */
+    Map<String, Object> getOtherEngagedAudience(String range, String startDate, String endDate, boolean fullMobile);
+
     Map<String, Object> getStoreVisitBookedAudience(String range, String startDate, String endDate, boolean fullMobile);
 
     Map<String, Object> getClickedBuyOnlineAudience(String range, String startDate, String endDate, boolean fullMobile);

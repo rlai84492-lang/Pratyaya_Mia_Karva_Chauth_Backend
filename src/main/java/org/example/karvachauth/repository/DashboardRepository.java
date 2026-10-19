@@ -757,7 +757,10 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
     //   LIST_STARTED_NO_HINT   Wife    — 1+ pieces on her list, no Ishara sent
     //   BROWSING_NO_PURCHASE   Husband — reached the product carousel (2B), no "Buy Online" and no store tap
     //   SHORTLISTED_NO_VISIT   Sparkle — 1+ pieces on her list, no store tap, no booking
-    //   OTHER                  — engaged, not finished, but not in one of the four (e.g. still choosing a category)
+    //   STOPPED_AT_OPENER      — tapped a Step 0 button and nothing after (still on OPENER) — not a card;
+    //                            those customers are downloaded from the Conversations page (Step = Opener)
+    //   OTHER                  — engaged past the opener, not finished, not in one of the four
+    //                            (e.g. still choosing a category / budget) — the "Other engaged, not finished" card
     //
     // "Completed or opted in": actions taken in the window (bookings / leads by created_at, closed journeys by
     // closed_at).
@@ -796,6 +799,9 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
                     "              AND NOT " + STORE_TAP_ON_SESSION +
                     "              AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.session_id = s.id AND b.status IN ('CONFIRMED', 'VISITED')) " +
                     "           THEN 'SHORTLISTED_NO_VISIT' " +
+                    // NEW — stopped right after the Step 0 tap: kept out of OTHER (still counted in Engaged, Not Finished)
+                    "         WHEN s.current_step = 'OPENER' " +
+                    "           THEN 'STOPPED_AT_OPENER' " +
                     "         ELSE 'OTHER' " +
                     "       END AS segment " +
                     "FROM sessions s " +

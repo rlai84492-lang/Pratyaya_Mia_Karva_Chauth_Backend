@@ -1450,7 +1450,12 @@ public class DashboardServiceImple implements DashboardService {
             new AudienceSegment("browsing-no-purchase", "BROWSING_NO_PURCHASE", "Browsing for her, no purchase",
                     List.of("shopping"), 3),
             new AudienceSegment("shortlisted-no-visit", "SHORTLISTED_NO_VISIT", "Shortlisted for herself, no visit",
-                    List.of("sparkle"), 3));
+//                    List.of("sparkle"), 3));
+                    List.of("sparkle"), 3),
+            // NEW — everyone else who engaged past the opener and hasn't finished (segment OTHER).
+            // Not in the 4 cards above, and not stopped at the opener (STOPPED_AT_OPENER — see Conversations).
+            new AudienceSegment("other-engaged", "OTHER", "Other engaged, not finished",
+                    List.of("celebrating", "shopping", "sparkle"), 4));
 
     private static final List<AudienceSegment> COMPLETED_SEGMENTS = List.of(
             new AudienceSegment("store-visit-booked", null, "Store visit booked",
@@ -1539,6 +1544,12 @@ public class DashboardServiceImple implements DashboardService {
     @Override
     public Map<String, Object> getShortlistedNoVisitAudience(String range, String startDate, String endDate, boolean fullMobile) {
         return buildAudienceCardData("shortlisted-no-visit", range, startDate, endDate, fullMobile);
+    }
+
+    /** NEW — Other engaged, not finished (all paths): past the opener, not in the 4 cards, not finished. */
+    @Override
+    public Map<String, Object> getOtherEngagedAudience(String range, String startDate, String endDate, boolean fullMobile) {
+        return buildAudienceCardData("other-engaged", range, startDate, endDate, fullMobile);
     }
 
     @Override
