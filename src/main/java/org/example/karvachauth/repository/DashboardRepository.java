@@ -490,19 +490,49 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
         String getBudget();
         LocalDateTime getStartedAt();
         LocalDateTime getLastActivity();
+        String getProductsChosen();      // "Name (SKU), Name (SKU)" — her list + "Buy this for her" picks
     }
 
     /** One page of the table. Export uses the same query (limit = page size, or the export cap). */
+//    @Query(nativeQuery = true, value =
+//            "SELECT * FROM ( " +
+//                    "  SELECT conversation.*, " + CONVERSATION_SORT_VALUE + " AS sortValue " +
+//                    "  FROM (" + CONVERSATION_ROWS + ") conversation " +
+//                    CONVERSATION_FILTERS +
+//                    ") filtered " +
+//                    "ORDER BY CASE WHEN :sortDirection = 'asc'  THEN filtered.sortValue END ASC, " +
+//                    "         CASE WHEN :sortDirection = 'desc' THEN filtered.sortValue END DESC, " +
+//                    "         filtered.lastActivity DESC, filtered.sessionId DESC " +
+//                    "LIMIT :limit OFFSET :offset")
+    /*
+     * Same rows, filters, sort and paging as before — the inner part is the old query unchanged.
+     * productsChosen is added OUTSIDE it, so it is worked out only for the rows of this page
+     * (50, or the export rows), and the count query (countConversations) is not touched.
+     * It is a single value per session (GROUP_CONCAT), so it can never add rows.
+     * The outer ORDER BY repeats the sort because MySQL doesn't keep a derived table's order.
+     */
     @Query(nativeQuery = true, value =
-            "SELECT * FROM ( " +
-                    "  SELECT conversation.*, " + CONVERSATION_SORT_VALUE + " AS sortValue " +
-                    "  FROM (" + CONVERSATION_ROWS + ") conversation " +
+            "SELECT pageRows.*, " +
+                    "       (SELECT GROUP_CONCAT(CONCAT(p.name, ' (', p.sku, ')') ORDER BY p.name SEPARATOR ', ') " +
+                    "          FROM products p " +
+                    "         WHERE p.sku IN (SELECT w.sku FROM wishlist_items w WHERE w.session_id = pageRows.sessionId " +
+                    "                         UNION " +
+                    "                         SELECT pp.sku FROM product_picks pp WHERE pp.session_id = pageRows.sessionId " +
+                    "                            AND pp.action_type IN ('ADDED', 'SELECTED'))) AS productsChosen " +
+                    "FROM ( " +
+                    "  SELECT * FROM ( " +
+                    "    SELECT conversation.*, " + CONVERSATION_SORT_VALUE + " AS sortValue " +
+                    "    FROM (" + CONVERSATION_ROWS + ") conversation " +
                     CONVERSATION_FILTERS +
-                    ") filtered " +
-                    "ORDER BY CASE WHEN :sortDirection = 'asc'  THEN filtered.sortValue END ASC, " +
-                    "         CASE WHEN :sortDirection = 'desc' THEN filtered.sortValue END DESC, " +
-                    "         filtered.lastActivity DESC, filtered.sessionId DESC " +
-                    "LIMIT :limit OFFSET :offset")
+                    "  ) filtered " +
+                    "  ORDER BY CASE WHEN :sortDirection = 'asc'  THEN filtered.sortValue END ASC, " +
+                    "           CASE WHEN :sortDirection = 'desc' THEN filtered.sortValue END DESC, " +
+                    "           filtered.lastActivity DESC, filtered.sessionId DESC " +
+                    "  LIMIT :limit OFFSET :offset " +
+                    ") pageRows " +
+                    "ORDER BY CASE WHEN :sortDirection = 'asc'  THEN pageRows.sortValue END ASC, " +
+                    "         CASE WHEN :sortDirection = 'desc' THEN pageRows.sortValue END DESC, " +
+                    "         pageRows.lastActivity DESC, pageRows.sessionId DESC")
     List<ConversationRowProjection> findConversationsPage(@Param("path") String path,
                                                           @Param("from") LocalDateTime from,
                                                           @Param("to") LocalDateTime to,
@@ -802,11 +832,25 @@ public interface DashboardRepository extends JpaRepository<Lead, Long> {
         LocalDateTime getStartedAt();
         LocalDateTime getLastActivity();
         String getSegment();
+        String getProductsChosen();      // "Name (SKU), Name (SKU)" — her list + "Buy this for her" picks
     }
 
-    /** The customers in one "Where they stopped" segment — for its download. */
+    /**
+     * The customers in one "Where they stopped" segment — for its download.
+     * productsChosen = every piece she chose in that journey: added to her list (wishlist_items, Wife / Sparkle)
+     * or picked with "Buy this for her" / "Add to my list" (product_picks SELECTED / ADDED, Husband too).
+     * Worked out here only (not in AUDIENCE_JOURNEYS), so the card counts don't pay for it.
+     */
     @Query(nativeQuery = true, value =
-            "SELECT journey.* FROM (" + AUDIENCE_JOURNEYS + ") journey " +
+//            "SELECT journey.* FROM (" + AUDIENCE_JOURNEYS + ") journey " +
+            "SELECT journey.*, " +
+                    "       (SELECT GROUP_CONCAT(CONCAT(p.name, ' (', p.sku, ')') ORDER BY p.name SEPARATOR ', ') " +
+                    "          FROM products p " +
+                    "         WHERE p.sku IN (SELECT w.sku FROM wishlist_items w WHERE w.session_id = journey.sessionId " +
+                    "                         UNION " +
+                    "                         SELECT pp.sku FROM product_picks pp WHERE pp.session_id = journey.sessionId " +
+                    "                            AND pp.action_type IN ('ADDED', 'SELECTED'))) AS productsChosen " +
+                    "FROM (" + AUDIENCE_JOURNEYS + ") journey " +
                     "WHERE journey.segment = :segment " +
                     "ORDER BY journey.lastActivity DESC " +
                     "LIMIT :limit")

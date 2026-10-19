@@ -609,8 +609,11 @@ public class DashboardServiceImple implements DashboardService {
     private static final DateTimeFormatter EXPORT_DATE_TIME = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
 
     /** Export columns, in order. "Budget" is dropped on the "I'm celebrating" path (see budgetShownFor). */
+//    private static final List<String> EXPORT_COLUMNS = List.of(
+//            "Customer", "Phone", "Path", "Step", "Status", "Category", "Budget", "Started At", "Last Activity");
     private static final List<String> EXPORT_COLUMNS = List.of(
-            "Customer", "Phone", "Path", "Step", "Status", "Category", "Budget", "Started At", "Last Activity");
+            "Customer", "Phone", "Path", "Step", "Status", "Category", "Products Chosen", "Budget",
+            "Started At", "Last Activity");
 
     /** Column header → value the repository sorts on (see CONVERSATION_SORT_VALUE). */
     private static final Map<String, String> SORT_COLUMNS = Map.of(
@@ -803,6 +806,7 @@ public class DashboardServiceImple implements DashboardService {
         tableRow.put("status", conversationStatus(row, now));
         tableRow.put("category", row.getCategory());
         tableRow.put("categoryLabel", CATEGORY_LABELS.get(row.getCategory()));
+        tableRow.put("productsChosen", row.getProductsChosen());   // NEW — null when she chose nothing
         if (showBudget) {
             tableRow.put("budget", row.getBudget());
             tableRow.put("budgetLabel", BUDGET_LABELS.get(row.getBudget()));
@@ -872,6 +876,7 @@ public class DashboardServiceImple implements DashboardService {
                 : scriptStep.code() + " · " + scriptStep.label());
         exportRow.put("Status", conversationStatus(row, now));
         exportRow.put("Category", textOrEmpty(CATEGORY_LABELS.get(row.getCategory())));
+        exportRow.put("Products Chosen", textOrEmpty(row.getProductsChosen()));   // NEW — right after Category
         if (showBudget) {
             exportRow.put("Budget", textOrEmpty(BUDGET_LABELS.get(row.getBudget())));
         }
@@ -1592,8 +1597,10 @@ public class DashboardServiceImple implements DashboardService {
                 .filter(segment -> segment.key().equals(key)).findFirst().orElse(null);
 
         if (stoppedSegment != null) {
-            columns = List.of("Customer", "Mobile", "Path", "Step", "Category", "Budget", "Pieces on List",
-                    "Started At", "Last Activity");
+//            columns = List.of("Customer", "Mobile", "Path", "Step", "Category", "Budget", "Pieces on List",
+//                    "Started At", "Last Activity");
+            columns = List.of("Customer", "Mobile", "Path", "Step", "Category", "Products Chosen", "Budget",
+                    "Pieces on List", "Started At", "Last Activity");
             for (DashboardRepository.AudienceMemberProjection member : dashboardRepo.findAudienceSegmentMembers(
                     stoppedSegment.dbValue(), from, to, ALL_ROWS)) {
                 ScriptStep step = SCRIPT_STEP_BY_BOT_STEP.get(member.getCurrentStep());
@@ -1603,6 +1610,7 @@ public class DashboardServiceImple implements DashboardService {
                 row.put("Path", pathLabel(member.getPath()));
                 row.put("Step", step == null ? textOrEmpty(member.getCurrentStep()) : step.code() + " · " + step.label());
                 row.put("Category", textOrEmpty(CATEGORY_LABELS.get(member.getCategory())));
+                row.put("Products Chosen", textOrEmpty(member.getProductsChosen()));   // NEW — right after Category
                 row.put("Budget", textOrEmpty(BUDGET_LABELS.get(member.getBudget())));
                 row.put("Pieces on List", String.valueOf(valueOrZero(member.getPiecesOnList())));
                 row.put("Started At", formatExportTime(member.getStartedAt()));
